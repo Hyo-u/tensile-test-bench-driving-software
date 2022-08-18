@@ -78,8 +78,13 @@ def lecture_donnee(file_name):
    return data
 #V
 DOSSIER_CONFIG_ET_CONSIGNES = lecture_donnee("dossier_config_et_consignes.txt") + SEPARATEUR
+DOSSIER_ENREGISTREMENTS = lecture_donnee("dossier_enregistrements.txt") + SEPARATEUR
 print(DOSSIER_CONFIG_ET_CONSIGNES)
 launch_crappy_event = Event()
+charge_max = -10
+position_min = 2000
+position_max = -10
+
 
 def etalonnage_des_coefficients_de_transformation():
    """FR : Étalonne les coefficient de la fonction transformation_voltage_tonnage.
@@ -234,7 +239,7 @@ def _card_to_pid(dic):
       dic ["sortie_charge_transformee"] = 0.0
       return dic
    x = 2 * dic["sortie_charge"]
-   dic["sortie_charge_transformee"] = (0.0037*(x**2)+1.0255*x-0.0644)/2
+   dic["sortie_charge_transformee"] = (etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2
    return dic  # Faire des test pour vérifier s'il y a vraiment besoin du 2 * <> /2.
 
 def _gen_to_graph_in_tons(dic):
@@ -242,34 +247,53 @@ def _gen_to_graph_in_tons(dic):
       dic["t(s)"] = time.time()
       dic ["Consigne(transformée)"] = 0.0
       return dic
-   x = 2 * dic["consigne"]
-   dic["Consigne(transformée)"] = (etalonnage_a * (x**2) + etalonnage_b * x + etalonnage_c)
+   dic["Consigne(T)"] = 2 * dic["consigne"]
+    #TODO : fonction inverse de l'étalonnage
    return dic
 
 def _card_to_recorder_and_graph(dic) :
-   dic["Charge(tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge_transformee"]
+   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge"]
    # dic["sortie_deplacement"] = <fonction de la sortie en déplacement>
    return dic
 
 def _pid_to_card_charge(dic) :
    if 0.03 < dic["entree_charge"]  :
-      dic["entree_charge"] += 0.44 #0.458
+      dic["entree_charge"] += 0.03 #0.458
    else :
       dic["entree_charge"] = 0
    return dic
 
 def _pid_to_card_decharge(dic) :
    if -0.03 > dic["entree_decharge"]  :
-      dic["entree_decharge"] -= 0.49 #0.525
+      dic["entree_decharge"] -= 1.11 #0.525
    else :
       dic["entree_decharge"] = 0
    dic["entree_decharge"] *= -1
    return dic
 
+def _gen_to_dashboard(dic) :
+   dic["Temps (s)"] = dic["t(s)"]
+   dic["Consigne (T)"] = 2 * dic["consigne"]
+   return dic
+
+def _card_to_dashboard(dic) :
+   global charge_max, position_max, position_min
+   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge"]
+   if dic["Charge (Tonnes)"] > charge_max :
+      charge_max = dic["Charge (Tonnes)"]
+   dic["Charge max (T)"] = charge_max
+   sortie_position_en_mm = dic["sortie_deplacement"] * COEF_VOLTS_TO_MILLIMETERS
+   if sortie_position_en_mm > position_max :
+      position_max = sortie_position_en_mm
+   dic["Position max (mm)"] = position_max
+   if sortie_position_en_mm < position_min :
+      position_min = sortie_position_en_mm
+   dic["Position max (mm)"] = position_min
+   return dic
 ### Reste
 
 def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistrement = None,
-                        parametres_du_test = [], labels_a_enregistrer = None):
+                              parametres_du_test = [], labels_a_enregistrer = None):
    """TODO"""
    gen = crappy.blocks.Generator(path = consignes_generateur,
                                  cmd_label = 'consigne',
@@ -283,17 +307,17 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
-                                    channels=[{'name': 'Dev1/ao0'},
-                                    {'name': 'Dev1/ao1'},
-                                    {'name': 'Dev1/ai6'},
-                                    {'name': 'Dev1/ai7'}],
+                                    channels=[{'name': 'Dev2/ao0'},
+                                    {'name': 'Dev2/ao1'},
+                                    {'name': 'Dev2/ai6'},
+                                    {'name': 'Dev2/ai7'}],
                                     spam=True,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
 
-   pid_charge = crappy.blocks.PID(kp=1,
-                                 ki=0.01,
-                                 kd=0.01,
+   pid_charge = crappy.blocks.PID(kp=0.2,
+                                 ki=0.0,
+                                 kd=0.0,
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
@@ -303,7 +327,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
-   pid_decharge = crappy.blocks.PID(kp=0.5,
+   pid_decharge = crappy.blocks.PID(kp=0.1,
                                     ki=0.0,
                                     kd=0.0,
                                     out_max=5,
@@ -325,20 +349,23 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
-   graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
-                                          ("t(s)", "sortie_charge_transformee"),
+   graphe = customblocks.EmbeddedGrapher(("t(s)", "Consigne(T)"), 
+                                          ("t(s)", "Charge (Tonnes)"),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
 
+   pancarte = crappy.blocks.Dashboard(labels = ["t(s)"],#["Temps (s)", "Consigne (T)", "Position (mm)", "Charge (T)", "Charge max (T)", "Position min (mm)", "Position max (mm)"],
+                                       freq = 5)
+   # liste_des_blocs_crappy_utilises.append(pancarte)
+
    if fichier_d_enregistrement is not None :
       record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
                               labels = labels_a_enregistrer,
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
-
 
    crappy.link(gen, y_charge)
    crappy.link(gen, y_decharge)
@@ -350,6 +377,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, gen, modifier=_card_to_pid)
 
+   crappy.link(gen, y_record, modifier = _gen_to_graph_in_tons)
    crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, y_record, modifier=
@@ -360,6 +388,8 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
    crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
+   # crappy.link(gen, pancarte, modifier = _gen_to_dashboard)
+   # crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
 
    crappy.start()
    crappy.reset()
@@ -379,10 +409,10 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
-                                    channels=[{'name': 'Dev1/ao0'},
-                                    {'name': 'Dev1/ao1'},
-                                    {'name': 'Dev1/ai6'},
-                                    {'name': 'Dev1/ai7'}],
+                                    channels=[{'name': 'Dev2/ao0'},
+                                    {'name': 'Dev2/ao1'},
+                                    {'name': 'Dev2/ai6'},
+                                    {'name': 'Dev2/ai7'}],
                                     spam=True,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
@@ -964,7 +994,7 @@ def configuration_initiale (init_titre, init_nom,
    entree_charge_rupture=Entry( fenetre2, textvariable=charge_de_rupture, width=5, validate="key", validatecommand=(fenetre2.register(_check_entree_charge), '%P'))
    entree_charge_rupture.grid(row=6,column=1,padx =5, pady =5, sticky = "w")
 
-   Label(fenetre2,text="Longueur utile de l'éprouvette (en m)").grid(row = 7, column = 0, padx = 5, pady = 5)
+   Label(fenetre2,text="Longueur de l'éprouvette (en m)").grid(row = 7, column = 0, padx = 5, pady = 5)
    Entry(fenetre2, textvariable=longueur_utile, width=5, validate="key", validatecommand=(fenetre2.register(_check_entree_longueur), '%P')).grid(row = 7, column = 1, padx = 5, pady = 5, sticky = "w")
          
    cadre_longueur_banc=LabelFrame( fenetre2)
@@ -1458,6 +1488,27 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       for bloc in liste_des_blocs_crappy_utilises :
          bloc.stop()
       crappy.stop()
+
+      gen = crappy.blocks.Generator(path=[{'type': 'constant',
+                               'value': 0,
+                               'condition': "delay=0.01"}],
+                          cmd_label='commande_en_charge',
+                          spam=True)
+
+      carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
+                                    labels=["t(s)", "sortie_charge", 
+                                             "sortie_deplacement"],
+                                    cmd_labels=["commande_en_charge", "commande_en_charge"],
+                                    initial_cmd=[0.0, 0.0],
+                                    exit_values=[0.0, 0.0],
+                                    channels=[{'name': 'Dev2/ao0'},
+                                    {'name': 'Dev2/ao1'},
+                                    {'name': 'Dev2/ai6'},
+                                    {'name': 'Dev2/ai7'}])
+
+      crappy.link(gen, carte_NI)
+      crappy.start()
+
 
       activer_bouton(bouton_enregistrer_et_quitter)
       desactiver_bouton(pause_btn)
@@ -1975,9 +2026,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      case 0 :
                         consigne_a_changer["condition"] = None
                      case 1 :
-                        consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge.get())
+                        consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge.get()/2)
                      case 2 :
-                        consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge.get())
+                        consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge.get()/2)
                      case 3 :
                         consigne_a_changer["condition"] = "delay=" + str(condition_en_temps.get())
                case "cyclic" :
@@ -1994,9 +2045,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      case 0 :
                         consigne_a_changer["condition1"] = None
                      case 1 :
-                        consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge1.get())
+                        consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge1.get()/2)
                      case 2 :
-                        consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge1.get())
+                        consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge1.get()/2)
                      case 3 :
                         consigne_a_changer["condition1"] = "delay=" + str(condition_en_temps1.get())
                   
@@ -2005,9 +2056,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      case 0 :
                         consigne_a_changer["condition2"] = None
                      case 1 :
-                        consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge2.get())
+                        consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge2.get()/2)
                      case 2 :
-                        consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge2.get())
+                        consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge2.get()/2)
                      case 3 :
                         consigne_a_changer["condition2"] = "delay=" + str(condition_en_temps2.get())
                   
@@ -2079,10 +2130,10 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      type_de_condition.set(0)
                   elif '>' in cond :
                      type_de_condition.set(1)
-                     condition_superieure_a_charge.set(float(cond[DEBUT_CONDITION_CHARGE:]))
+                     condition_superieure_a_charge.set(2 * float(cond[DEBUT_CONDITION_CHARGE:]))
                   elif '<' in cond :
                      type_de_condition.set(2)
-                     condition_inferieure_a_charge.set(float(cond[DEBUT_CONDITION_CHARGE:]))
+                     condition_inferieure_a_charge.set(2 * float(cond[DEBUT_CONDITION_CHARGE:]))
                   else :
                      type_de_condition.set(3)
                      condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
@@ -2156,20 +2207,20 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                   nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
                   if '>' in cond1 :
                      type_de_condition1.set(1)
-                     condition_superieure_a_charge1.set(float(cond1[DEBUT_CONDITION_CHARGE:]))
+                     condition_superieure_a_charge1.set(2 * float(cond1[DEBUT_CONDITION_CHARGE:]))
                   elif '<' in cond1 :
                      type_de_condition1.set(2)
-                     condition_inferieure_a_charge1.set(float(cond1[DEBUT_CONDITION_CHARGE:]))
+                     condition_inferieure_a_charge1.set(2 * float(cond1[DEBUT_CONDITION_CHARGE:]))
                   else :
                      type_de_condition1.set(3)
                      condition_en_temps1.set(float(cond1[DEBUT_CONDITION_TEMPS:]))
                   
                   if '>' in cond2 :
                      type_de_condition2.set(1)
-                     condition_superieure_a_charge2.set(float(cond2[DEBUT_CONDITION_CHARGE:]))
+                     condition_superieure_a_charge2.set(2 * float(cond2[DEBUT_CONDITION_CHARGE:]))
                   elif '<' in cond2 :
                      type_de_condition2.set(2)
-                     condition_inferieure_a_charge2.set(float(cond2[DEBUT_CONDITION_CHARGE:]))
+                     condition_inferieure_a_charge2.set(2 * float(cond2[DEBUT_CONDITION_CHARGE:]))
                   else :
                      type_de_condition2.set(3)
                      condition_en_temps2.set(float(cond2[DEBUT_CONDITION_TEMPS:]))
@@ -2344,7 +2395,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      elif condition_d_arret.startswith('delay') :
                         label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
                      else :
-                        label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                        label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
                   case "constant" :
                      label_de_cette_consigne = "Palier à "
                      label_de_cette_consigne += f"{2 * consigne_du_generateur['value']}T"
@@ -2362,13 +2413,13 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      if condition_d_arret.startswith('delay') :
                         label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
                      else :
-                        label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                        label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
                      label_de_cette_consigne += f", {2 * consigne_du_generateur['speed2']}T/s"
                      condition_d_arret = consigne_du_generateur["condition2"]
                      if condition_d_arret.startswith('delay') :
                         label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
                      else :
-                        label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                        label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
                   case "cyclic" :
                      label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de paliers : "
                      label_de_cette_consigne += f"{2 * consigne_du_generateur['value1']}T"
@@ -2466,14 +2517,14 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       if entrees[10]:
          pass # rajouter des trucs pour ISO-2307
       parametres.append('')
-      labels_voulus = ["t(s)", "consigne", "sortie_charge", "sortie_charge_transformée", "sortie_deplacement"]
+      labels_voulus = ["t(s)", "Consigne(T)", "sortie_charge", "sortie_charge_transformee", "Charge (Tonnes)", "sortie_deplacement"]
       # while True:
       launch_crappy_event.wait()
       launch_crappy_event.clear()
       if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
        #TODO : demarrage_de_crappy_charge
          demarrage_de_crappy_charge(consignes_generateur = consignes_du_generateur, 
-                        fichier_d_enregistrement = str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
+                        fichier_d_enregistrement = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                            #TODO : add lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt")
                         parametres_du_test = parametres, 
                         labels_a_enregistrer = labels_voulus)
@@ -2550,8 +2601,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    choix_des_documents_a_enregistrer.set(0)
    charge_de_rupture=DoubleVar()
    charge_de_rupture.set(entrees[4])
-   # data=recup_data() # Données fournies par la carte sur les 8 canaux
-   data =  [random.random()*5 for _ in range(8)]
    valeur_maximale_de_déplacement=DoubleVar() # Valeur maximale en déplacement
    valeur_maximale_de_déplacement.set(-10000)
    valeur_minimale_de_déplacement=DoubleVar() # Valeur minimale en déplacement

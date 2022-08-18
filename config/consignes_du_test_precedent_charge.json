@@ -1,1 +1,1 @@
-[{"type": "ramp", "speed": 0.3, "condition": "sortie_charge_transformee>3.0"}, {"type": "constant", "value": 1.5, "condition": "delay=8.0"}]
+[{"type": "ramp", "speed": 0.25, "condition": "sortie_charge_transformee>2.5"}]
