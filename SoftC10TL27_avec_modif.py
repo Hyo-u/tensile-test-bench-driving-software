@@ -62,6 +62,7 @@ ASSERVISSEMENT_EN_CHARGE = 1
 ASSERVISSEMENT_EN_DEPLACEMENT = 2
 SEPARATEUR = "\\" # "\\" for windows, "/" for linux
 
+liste_des_blocs_crappy_utilises = []
 verrou_production = OFF
 alphabet=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
 next_available_letter=0
@@ -274,6 +275,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  cmd_label = 'consigne',
                                  spam = True,
                                  freq = 50)
+   liste_des_blocs_crappy_utilises.append(gen)
 
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
                                     labels = ["t(s)", "sortie_charge", 
@@ -287,6 +289,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     {'name': 'Dev1/ai7'}],
                                     spam=True,
                                     freq = 50)
+   liste_des_blocs_crappy_utilises.append(carte_NI)
 
    pid_charge = crappy.blocks.PID(kp=1,
                                  ki=0.01,
@@ -298,6 +301,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  labels=["t(s)", 'entree_charge'],
                                  input_label='sortie_charge_transformee',
                                  freq = 50)
+   liste_des_blocs_crappy_utilises.append(pid_charge)
 
    pid_decharge = crappy.blocks.PID(kp=0.5,
                                     ki=0.0,
@@ -309,34 +313,32 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     labels=["t(s)", 'entree_decharge'],
                                     input_label='sortie_charge_transformee',
                                     freq = 50)
+   liste_des_blocs_crappy_utilises.append(pid_decharge)
 
    y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
                                                 "sortie_charge_transformee"],
                                  freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_charge)
 
    y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
                                                 "sortie_charge_transformee"],
                                     freq = 50)
-   
+   liste_des_blocs_crappy_utilises.append(y_decharge)
+
    graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
                                           ("t(s)", "sortie_charge_transformee"),
                                           freq = 3)
-
-   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", "sortie_charge_transformee"], freq = 50)
+   liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_record)
 
    if fichier_d_enregistrement is not None :
       record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
                               labels = labels_a_enregistrer,
-                              # ["t(s)", 
-                              #    "x(mm)", 
-                              #    "F(N)",
-                              #    "entree_charge"],
-                              parametres_a_inscrire = parametres_du_test
-                              # , labels = labels_a_enregistrer
-                              )
-  
+                              parametres_a_inscrire = parametres_du_test)
+      liste_des_blocs_crappy_utilises.append(record)
+
 
    crappy.link(gen, y_charge)
    crappy.link(gen, y_decharge)
@@ -363,141 +365,97 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    crappy.reset()
 
 def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enregistrement = None,
-                        parametres_du_test = [], labels_a_enregistrer = None
-                        # ,fenetre_d_integration = None, canevas_d_integration = None
-                        ):
-   if False :
-      gen = crappy.blocks.Generator(path = consignes_generateur,
+                        parametres_du_test = [], labels_a_enregistrer = None):
+   """TODO"""
+   gen = crappy.blocks.Generator(path = consignes_generateur,
                                  cmd_label = 'consigne',
                                  spam = True,
                                  freq = 50)
+   liste_des_blocs_crappy_utilises.append(gen)
 
-      carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
-                                       labels = ["t(s)", "sortie_charge", 
-                                                "sortie_deplacement"],
-                                       cmd_labels = ["entree_decharge", "entree_charge"],
-                                       initial_cmd = [0.0, 0.0],
-                                       exit_values = [0.0, 0.0],
-                                       channels=[{'name': 'Dev1/ao0'},
-                                       {'name': 'Dev1/ao1'},
-                                       {'name': 'Dev1/ai6'},
-                                       {'name': 'Dev1/ai7'}],
-                                       spam=True,
-                                       freq = 50)
+   carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
+                                    labels = ["t(s)", "sortie_charge", 
+                                             "sortie_deplacement"],
+                                    cmd_labels = ["entree_decharge", "entree_charge"],
+                                    initial_cmd = [0.0, 0.0],
+                                    exit_values = [0.0, 0.0],
+                                    channels=[{'name': 'Dev1/ao0'},
+                                    {'name': 'Dev1/ao1'},
+                                    {'name': 'Dev1/ai6'},
+                                    {'name': 'Dev1/ai7'}],
+                                    spam=True,
+                                    freq = 50)
+   liste_des_blocs_crappy_utilises.append(carte_NI)
 
-      pid_charge = crappy.blocks.PID(kp=1,
-                              ki=0.01,
-                              kd=0.01,
-                              out_max=5,
-                              out_min=-5,
-                              i_limit=0.5,
-                              target_label='consigne',
-                              labels=["t(s)", 'entree_charge'],
-                              input_label='sortie_charge_transformee',
-                              freq = 50)
-
-      pid_decharge = crappy.blocks.PID(kp=0.5,
-                              ki=0.0,
-                              kd=0.0,
-                              out_max=5,
-                              out_min=-5,
-                              i_limit=0.5,
-                              target_label='consigne',
-                              labels=["t(s)", 'entree_decharge'],
-                              input_label='sortie_charge_transformee',
-                              freq = 50)
-
-      y_charge = YBlock(out_labels = ["t(s)", "consigne", "sortie_charge_transformee"],
-                              freq = 50)
-
-      y_decharge = YBlock(out_labels = ["consigne", "sortie_charge_transformee"],
-                              freq = 50)
-   
-   gen = crappy.blocks.Generator(path = consignes_generateur,
-                              cmd_label = 'consigne',
-                              # spam = True,
-                              freq = 50)
-
-   carte_NI = crappy.blocks.Fake_machine(k = 10000*450,
-                                          l0 = 4000,
-                                          maxstrain = 7,
-                                          nu = 0.5,
-                                          max_speed = 100,
-                                          mode = 'speed',
-                                          cmd_label = "entree_charge",
-                                          plastic_law = plastic)
-   
    pid_charge = crappy.blocks.PID(kp=1,
-                                 ki=0.0,
-                                 kd=0.0,
+                                 ki=0.01,
+                                 kd=0.01,
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
-                                 target_label="consigne",
+                                 target_label='consigne',
                                  labels=["t(s)", 'entree_charge'],
                                  input_label='sortie_charge_transformee',
                                  freq = 50)
+   liste_des_blocs_crappy_utilises.append(pid_charge)
+
+   pid_decharge = crappy.blocks.PID(kp=0.5,
+                                    ki=0.0,
+                                    kd=0.0,
+                                    out_max=5,
+                                    out_min=-5,
+                                    i_limit=0.5,
+                                    target_label='consigne',
+                                    labels=["t(s)", 'entree_decharge'],
+                                    input_label='sortie_charge_transformee',
+                                    freq = 50)
+   liste_des_blocs_crappy_utilises.append(pid_decharge)
+
+   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
+                                                "sortie_charge_transformee"],
+                                 freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_charge)
+
+   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
+                                                "sortie_charge_transformee"],
+                                    freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_decharge)
 
    graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
-                              ("t(s)", "sortie_charge_transformee"),
-                              freq = 3
-                              # ,figure = fenetre_d_integration,
-                              # canevas = canevas_d_integration
-                              )
-
-   # y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", "sortie_charge_transformee"], freq = 50)
-   y_charge = crappy.blocks.Multiplex(freq = 50)
+                                          ("t(s)", "sortie_charge_transformee"),
+                                          freq = 3)
+   liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_record)
 
-   # if fichier_d_enregistrement is not None :
-   #    record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
-   #                            labels = ["t(s)", 
-   #                               "x(mm)", 
-   #                               "F(N)",
-   #                               "entree_charge"],
-   #                            parametres_a_inscrire = parametres_du_test
-   #                            # , labels = labels_a_enregistrer
-   #                            )
+   if fichier_d_enregistrement is not None :
+      record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
+                              labels = labels_a_enregistrer,
+                              parametres_a_inscrire = parametres_du_test)
+      liste_des_blocs_crappy_utilises.append(record)
+
 
    crappy.link(gen, y_charge)
-   crappy.link(carte_NI, y_charge, modifier = carte_to_gen)
+   crappy.link(gen, y_decharge)
+   crappy.link(carte_NI, y_charge, modifier=_card_to_pid)
+   crappy.link(carte_NI, y_decharge, modifier=_card_to_pid)
    crappy.link(y_charge, pid_charge)
-   crappy.link(pid_charge, carte_NI)
-   crappy.link(carte_NI, gen, modifier = carte_to_gen)
-   crappy.link(pid_charge, y_record)
-   crappy.link(carte_NI, y_record)
-   # if fichier_d_enregistrement is not None :
-      # crappy.link(y_record, record)
-   crappy.link(carte_NI, graphe, modifier = carte_to_pid)
-   crappy.link(gen, graphe)   
+   crappy.link(y_decharge, pid_decharge)
+   crappy.link(pid_charge, carte_NI, modifier=_pid_to_card_charge)
+   crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
+   crappy.link(carte_NI, gen, modifier=_card_to_pid)
 
-   # crappy.link(gen, y_charge)
-   # # crappy.link(gen, y_decharge)
-   # # if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :    ## or match-case, maybe
-   # crappy.link(carte_NI, y_charge, modifier=_card_to_pid)
-   # crappy.link(carte_NI, y_decharge, modifier=_card_to_pid)
-   # # else :
-   # # crappy.link(carte_NI, y_charge, modifier=card_to_pid_in_millimeters)
-   # # crappy.link(carte_NI, y_decharge, modifier=card_to_pid_in_millimeters)
-   # crappy.link(y_charge, pid_charge)
-   # crappy.link(y_decharge, pid_decharge)
-   # crappy.link(pid_charge, carte_NI, modifier=_pid_to_card_charge)
-   # crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
-   # crappy.link(carte_NI, gen, modifier=_card_to_pid)
-
-   # crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
-   # crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
-   # crappy.link(carte_NI, y_record, modifier=
-   #                         [_card_to_recorder_and_graph, 
-   #                         crappy.modifier.Diff(label="sortie_charge_transformee", 
-   #                                              out_label="derivee_voltage")])
-   # if fichier_d_enregistrement is not None :
-   #    crappy.link(y_record, record)
-   # if fenetre_d_integration :
-   #    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
-   #    crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
-   #    crappy.link(gen, graphe)
+   crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
+   crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
+   crappy.link(carte_NI, y_record, modifier=
+                           [_card_to_recorder_and_graph, 
+                           crappy.modifier.Diff(label="sortie_charge_transformee", 
+                                                out_label="derivee_voltage")])
+   if fichier_d_enregistrement is not None :
+      crappy.link(y_record, record)
+   crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
+   crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
 
    crappy.start()
    crappy.reset()
@@ -523,6 +481,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                               cmd_label = 'consigne',
                               # spam = True,
                               freq = 50)
+   liste_des_blocs_crappy_utilises.append(gen)
 
    carte_NI = crappy.blocks.Fake_machine(k = 10000*450,
                                           l0 = 4000,
@@ -532,6 +491,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                                           mode = 'speed',
                                           cmd_label = "entree_charge",
                                           plastic_law = plastic)
+   liste_des_blocs_crappy_utilises.append(carte_NI)
    
    pid_charge = crappy.blocks.PID(kp=1,
                                  ki=0.0,
@@ -543,6 +503,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                                  labels=["t(s)", 'entree_charge'],
                                  input_label='sortie_charge_transformee',
                                  freq = 50)
+   liste_des_blocs_crappy_utilises.append(pid_charge)
 
    graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
                               ("t(s)", "sortie_charge_transformee"),
@@ -550,11 +511,13 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                               # ,figure = fenetre_d_integration,
                               # canevas = canevas_d_integration
                               )
+   liste_des_blocs_crappy_utilises.append(graphe)
 
-   # y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", "sortie_charge_transformee"], freq = 50)
    y_charge = crappy.blocks.Multiplex(freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_charge)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_record)
 
    if fichier_d_enregistrement is not None :
       record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
@@ -565,9 +528,11 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                               parametres_a_inscrire = parametres_du_test
                               # , labels = labels_a_enregistrer
                               )
+      liste_des_blocs_crappy_utilises.append(record)
 
    pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "F(N)", "sortie_charge_transformee"],
                                        freq = 5)
+   liste_des_blocs_crappy_utilises.append(pancarte)
 
    crappy.link(gen, y_charge)
    crappy.link(carte_NI, y_charge, modifier = carte_to_gen)
@@ -1487,33 +1452,25 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                suppression_d_un_fichier(nom_csv)
                suppression_d_un_fichier(nom_csv3)
       
-   def do_pause():
-      ###fonction permettant de faire pause sur l'animation
+   def stop_crappy():
+      """TODO"""
       
-      # output(RESET)
+      for bloc in liste_des_blocs_crappy_utilises :
+         bloc.stop()
+      crappy.stop()
 
-      
-      # activer_bouton(bouton_enregistrer_et_quitter)
-      # desactiver_bouton(pause_btn)
+      activer_bouton(bouton_enregistrer_et_quitter)
+      desactiver_bouton(pause_btn)
       # activer_bouton(bouton_parametrage_consigne)
       # activer_bouton(enregistrer_btn)
-      # activer_bouton(mise_a_0_btn)
-      # activer_bouton(mise_a_tension_btn)
-      # menu1.entryconfigure(4, state=NORMAL)
-      # if bouton_parametrage_consigne['bg']=='green' or mode_manuel.get()=='on' :
-      #    activer_bouton(start_btn)
-      crappy.stop()
+      activer_bouton(mise_a_0_btn)
+      activer_bouton(mise_a_tension_btn)
+      menu1.entryconfigure(4, state=NORMAL)
          
-   def start_fct():
-      """ """
-      # demarrage_de_crappy(consignes_du_generateur, 
-      #                      fichier_d_enregistrement = str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
-      #                 #TODO : add lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt")
-      #                      parametres_du_test = parametres, labels_a_enregistrer = labels_voulus
-      #                      # ,fenetre_d_integration = super_figure_ou_sera_placee_la_courbe,
-      #                      # canevas_d_integration = cadre_courbe
-      #                      )
-      # desactiver_bouton(start_btn)
+   def start_crappy():
+      """TODO"""
+      desactiver_bouton(start_btn)
+      activer_bouton(pause_btn)
       launch_crappy_event.set()
 
    def certif_fct ():
@@ -1775,10 +1732,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    def color_off() :
       ###fonction de coloration des boutons du mode manuel en mode 'off'
       on_button['bg']='gray'
-      if bouton_parametrage_consigne['bg']=='green':
-         activer_bouton(start_btn)
-      else :
-         desactiver_bouton(start_btn)
+      desactiver_bouton(start_btn)
          
    def mise_a_0_fct():
       ###fonction de mise à la position 0 du chariot
@@ -1795,8 +1749,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       zone_rappel_2.delete('zone2')
       zone_rappel_3.delete('zone3')
       zone_rappel_4.delete('zone4')
-      do_pause()
-      return start_fct()
+      stop_crappy()
+      return start_crappy()
       
    def mise_a_tension_fct():
       ### fonction de mise à la charge du chariot
@@ -1813,8 +1767,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       zone_rappel_2.delete('zone2')
       zone_rappel_3.delete('zone3')
       zone_rappel_4.delete('zone4')
-      do_pause()
-      return start_fct()
+      stop_crappy()
+      return start_crappy()
    
  #TODO : Gérer les différents PID et leur réglage. 
  #       Voir sensi_page() et reglage_des_coef_des_PID() dans les fonctions jetées.
@@ -2749,8 +2703,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
    zone_com=Entry( zone_com_label, textvariable= commentaires_de_l_utilisateur, width=25)
    
-   start_btn=Button(cadre_interne, text='Start', command=start_fct)
-   pause_btn=Button(cadre_interne, text='Pause', command=do_pause,bg='red')
+   start_btn=Button(cadre_interne, text='Start', command=start_crappy)
+   pause_btn=Button(cadre_interne, text='Pause', command=stop_crappy,bg='red')
    bouton_enregistrer_et_quitter=Button(cadre_interne, text='Quitter et enregistrer', command=enregistrer_et_quitter)
    mise_a_0_btn=Button(cadre_interne, text=' Mise à 0 ',command=mise_a_0_fct)
    mise_a_tension_btn=Button(cadre_interne, text=' Mise à tension ',command=mise_a_tension_fct)
