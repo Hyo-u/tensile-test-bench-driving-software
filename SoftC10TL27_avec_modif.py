@@ -1683,7 +1683,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             c.line(550,574,550,445)
             
             ###logo Ino-Rope
-            im = PIL.Image.open('Logo-Ino-Rope-blanc.png')
+            im = PIL.Image.open(DOSSIER_CONFIG_ET_CONSIGNES + 'Logo-Ino-Rope-blanc.png')
             c.drawInlineImage(im,455,775, width=90, height=14)
       
             nom_png="".join([nom[:len(nom)-5],'.png'])
@@ -2452,7 +2452,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                label_du_numero_de_bloc = Label(cadre_interne_consignes, text = f"Bloc {indice_de_cette_consigne}")
                label_du_numero_de_bloc.grid(row = (2 * indice_de_cette_consigne), column = 0, padx = 5, pady = 0, sticky = 'nw')
                # fenetre_de_choix_des_consignes.wm_attributes('-transparentcolor', label_du_numero_de_bloc['bg'])
-               # Label(cadre_de_cette_consigne, image = PhotoImage(file = "C:\\Users\\R&D\\Desktop\\Stage Inorope\\icones boutons\\rampe simple.png")).grid(row = 1, column = 0, padx = 5, pady = 5)
+               # Label(cadre_de_cette_consigne, image = PhotoImage(file = DOSSIER_CONFIG_ET_CONSIGNES + "rampe simple.png")).grid(row = 1, column = 0, padx = 5, pady = 5)
                Button(cadre_de_cette_consigne, text = "Supprimer cette consigne", command = lambda i = indice_de_cette_consigne - 1 : suppression_d_une_consigne(i)).grid(row = 1, column = 1, padx = 5, pady = 5)
                Button(cadre_de_cette_consigne, text = "Modifier cette consigne", command = lambda i = indice_de_cette_consigne - 1 : surcouche_modification(i)).grid(row = 1, column = 2, padx = 5, pady = 5, sticky = 'e')
                Button(cadre_interne_consignes, text = "Insérer une consigne", command = lambda i = indice_de_cette_consigne : surcouche_ajout(i)).grid(row = (2 * indice_de_cette_consigne + 1), column = 1, padx = 5, pady = 5, sticky = 'e')
@@ -2759,23 +2759,23 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    # bouton_parametrage_consigne = Button(cadre_interne, text=' ',bg='red',command=choix_du_type_d_asservissement)
    enregistrer_btn=Button(cadre_interne, text=' ', command=choix_enregistrer_fct)
    
-   img1 = PhotoImage(file="icone_enregistrer.png") # make sure to add "/" not "\"
+   img1 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_enregistrer.png") # make sure to add "/" not "\"
    enregistrer_btn.config(image=img1)
-   img2 = PhotoImage(file="icone_engrenage.png") # make sure to add "/" not "\"
+   img2 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_engrenage.png") # make sure to add "/" not "\"
    # bouton_parametrage_consigne.config(image=img2)
-   img3 = PhotoImage(file="icone_retour.png") # make sure to add "/" not "\"
+   img3 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_retour.png") # make sure to add "/" not "\"
    mise_a_0_btn.config(image=img3)
-   img6 = PhotoImage(file="icone_play.png") # make sure to add "/" not "\"
+   img6 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_play.png") # make sure to add "/" not "\"
    start_btn.config(image=img6)
-   img7 = PhotoImage(file="icone_stop.png") # make sure to add "/" not "\"
+   img7 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_stop.png") # make sure to add "/" not "\"
    pause_btn.config(image=img7)
-   img8 = PhotoImage(file="icone_tension.png") # make sure to add "/" not "\"
+   img8 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_tension.png") # make sure to add "/" not "\"
    mise_a_tension_btn.config(image=img8)
-   img11 = PhotoImage(file="pree_image.png") # make sure to add "/" not "\"
-   img21 = PhotoImage(file="rampe_image.png") # make sure to add "/" not "\"
-   img22 = PhotoImage(file="palier_image.png") # make sure to add "/" not "\"
-   img23 = PhotoImage(file="iso_image.png") # make sure to add "/" not "\"
-   img31 = PhotoImage(file="fatigue_image.png") # make sure to add "/" not "\"
+   img11 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "pree_image.png") # make sure to add "/" not "\"
+   img21 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "rampe_image.png") # make sure to add "/" not "\"
+   img22 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "palier_image.png") # make sure to add "/" not "\"
+   img23 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "iso_image.png") # make sure to add "/" not "\"
+   img31 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "fatigue_image.png") # make sure to add "/" not "\"
    
    
    # bal = tix.Balloon(cadre_interne)
