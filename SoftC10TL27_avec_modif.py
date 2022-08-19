@@ -64,6 +64,7 @@ TYPES_DE_CONSIGNE = {"constant" : "palier",
                      "cyclic_ramp" : "cycle de rampes",
                      "sine" : "sinus"}
 LABEL_SORTIE_EN_CHARGE = "sortie_charge_transformee"
+LABEL_SORTIE_EN_POSITION = "sortie_position_transformee"
 DEBUT_CONDITION_TEMPS = len("delay=")
 DEBUT_CONDITION_CHARGE = len(LABEL_SORTIE_EN_CHARGE) + 1
 
@@ -98,10 +99,12 @@ position_max = -10
 alphabet=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
 next_available_letter=0
 
-def etalonnage_des_coefficients_de_transformation():
-   """FR : Étalonne les coefficient de la fonction transformation_voltage_tonnage.
+fake_test = False# debug
 
-   EN : Calibrates the transformation_voltage_tonnage function's coefficients."""
+def etalonnage_des_coefficients_de_transformation():
+   """FR : Étalonne les coefficient de la fonction de passage de volts à tonnes.
+
+   EN : Calibrates the function passing from volts to tons coefficients."""
    #fonction calculant la valeur de charge réelle lue. 
    #Prend en x la tension délivrée par l'Indi-Paxs.
    #Sort la tension correspondant à la charge réelle.
@@ -246,11 +249,11 @@ def _card_to_pid(dic):
    """FR : Étalonne la tension renvoyée par le capteur d'efforts.
    
    EN : Calibrates the voltage fed back by the effort sensor."""
-   if "sortie_charge" not in dic.keys() :
+   if "sortie_charge_brute" not in dic.keys() :
       dic["t(s)"] = time.time()
       dic ["sortie_charge_transformee"] = 0.0
       return dic
-   x = 2 * dic["sortie_charge"]
+   x = 2 * dic["sortie_charge_brute"]
    dic["sortie_charge_transformee"] = (etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2
    return dic  # Faire des test pour vérifier s'il y a vraiment besoin du 2 * <> /2.
 
@@ -264,8 +267,8 @@ def _gen_to_graph_in_tons(dic):
    return dic
 
 def _card_to_recorder_and_graph(dic) :
-   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge"]
-   # dic["sortie_deplacement"] = <fonction de la sortie en déplacement>
+   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge_brute"]
+   # dic["sortie_position_brute"] = <fonction de la sortie en déplacement>
    return dic
 
 def _pid_to_card_charge(dic) :
@@ -290,11 +293,11 @@ def _gen_to_dashboard(dic) :
 
 def _card_to_dashboard(dic) :
    global charge_max, position_max, position_min
-   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge"]
+   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge_brute"]
    if dic["Charge (Tonnes)"] > charge_max :
       charge_max = dic["Charge (Tonnes)"]
    dic["Charge max (T)"] = charge_max
-   sortie_position_en_mm = dic["sortie_deplacement"] * COEF_VOLTS_TO_MILLIMETERS
+   sortie_position_en_mm = dic["sortie_position_brute"] * COEF_VOLTS_TO_MILLIMETERS
    if sortie_position_en_mm > position_max :
       position_max = sortie_position_en_mm
    dic["Position max (mm)"] = position_max
@@ -314,8 +317,8 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    liste_des_blocs_crappy_utilises.append(gen)
 
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
-                                    labels = ["t(s)", "sortie_charge", 
-                                             "sortie_deplacement"],
+                                    labels = ["t(s)", "sortie_charge_brute", 
+                                             "sortie_position_brute"],
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
@@ -327,9 +330,9 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
 
-   pid_charge = crappy.blocks.PID(kp=0.2,
-                                 ki=0.0,
-                                 kd=0.0,
+   pid_charge = crappy.blocks.PID(kp=1,
+                                 ki=0.01,
+                                 kd=0.1,
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
@@ -339,9 +342,9 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
-   pid_decharge = crappy.blocks.PID(kp=0.1,
-                                    ki=0.0,
-                                    kd=0.0,
+   pid_decharge = crappy.blocks.PID(kp=0.3,
+                                    ki=0.01,
+                                    kd=0.1,
                                     out_max=5,
                                     out_min=-5,
                                     i_limit=0.5,
@@ -416,8 +419,8 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    liste_des_blocs_crappy_utilises.append(gen)
 
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
-                                    labels = ["t(s)", "sortie_charge", 
-                                             "sortie_deplacement"],
+                                    labels = ["t(s)", "sortie_charge_brute", 
+                                             "sortie_position_brute"],
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
@@ -567,9 +570,9 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
 
-   # pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "F(N)", "sortie_charge_transformee"],
-   #                                     freq = 5)
-   # liste_des_blocs_crappy_utilises.append(pancarte)
+   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "F(N)", "sortie_charge_transformee"],
+                                       freq = 5)
+   liste_des_blocs_crappy_utilises.append(pancarte)
 
    crappy.link(gen, y_charge)
    crappy.link(carte_NI, y_charge, modifier = carte_to_gen)
@@ -582,7 +585,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier = carte_to_pid)
    crappy.link(gen, graphe)   
-   # crappy.link(y_record, pancarte)
+   crappy.link(y_record, pancarte)
 
    crappy.start()
    crappy.reset()
@@ -1015,7 +1018,7 @@ def configuration_initiale (init_titre, init_nom,
    coche24m.grid(row=10,column=1,padx =5, pady =5)
    coche26m = Radiobutton(cadre_longueur_banc, text="26m", variable=longueur_banc, value=4)
    coche26m.grid(row=11,column=1,padx =5, pady =5)  
-   if verrou_production==0 :
+   if verrou_production == OFF :
       coche9m = Radiobutton(cadre_longueur_banc, text="7m (pour une pièce métallique)", variable=longueur_banc, value=5)
       coche9m.grid(row=12,column=1,padx =5, pady =5)
 
@@ -1030,9 +1033,11 @@ def configuration_initiale (init_titre, init_nom,
       cordage_label=LabelFrame(fenetre2)
       cordage_label.grid(row=16,column=0,columnspan=3,padx =5, pady =5, sticky = "ew")
       ttk.Checkbutton(cordage_label, text = "Test ISO-2307", variable = is_test_iso, onvalue = True, offvalue = False, command = iso_quai).grid(row = 0, column = 0, columnspan = 3, padx = 5, pady = 5, sticky = "w")
+      
    charger_le_dernier_test = BooleanVar()
    charger_le_dernier_test.set(True)
-   ttk.Checkbutton(fenetre2, text = "Charger les consignes du dernier test", variable = charger_le_dernier_test, onvalue = True, offvalue = False).grid(row = 18, column = 0, columnspan = 2, padx = 5, pady = 5)
+   if verrou_production == OFF :
+      ttk.Checkbutton(fenetre2, text = "Charger les consignes du dernier test", variable = charger_le_dernier_test, onvalue = True, offvalue = False).grid(row = 18, column = 0, columnspan = 2, padx = 5, pady = 5)
 
    
    precedent1_btn=Button(fenetre2, text='Précédent', command=retour_au_choix_de_mode)
@@ -1048,20 +1053,7 @@ def configuration_initiale (init_titre, init_nom,
    if verrou_production==0 :
       menu.add_command(label="Modifier les chemins d'accès",command=lambda: modification_des_chemins_d_acces(fenetre2))
       menu.add_command(label="Modifier le mot de passe",command=lambda: modification_du_mot_de_passe(fenetre2))
-   
-   # bal = tix.Balloon(fenetre2)
-   # bal.bind_widget(precedent1_btn, msg="Retour au menu précédent")
-   # bal.bind_widget(suivant1_btn, msg="Aller vers la fenêtre d'acquisition")
-   # bal.bind_widget(entree_titre, msg="Entrez ici le titre du document")
-   # bal.bind_widget(entree_nom, msg="Entrez ici le nom de l'opérateur")
-   # bal.bind_widget(entree_materiau, msg="Entrez ici le matériau testé")
-   # bal.bind_widget(entree_charge_rupture, msg="Entrez ici la charge de charge_de_rupture du matériau testé. Une sécurité est mise en place pour ne jamais dépasser 50% de cette charge")
-   # bal.bind_widget(entree_prenom, msg="Entrez ici le prénom de l'opérateur")
-   # bal.bind_widget(entree_diametre, msg="Le numéro de référence représente le diamètre à vide du cordage")
 
-   # if verrou_production==0 :
-   #    bal.bind_widget(coche9m, msg="Cochez cette case si le matériau testé est en métal")
-   
    fenetre2.mainloop()
    
    return (titre.get(),nom.get(),materiau.get(),longueur_banc.get(),charge_de_rupture.get(),diametre_a_vide.get(),type_d_accroche.get(),est_episse.get(),diametre_du_cabestan.get(),longueur_utile.get(), is_test_iso.get(), charger_le_dernier_test.get())
@@ -1071,12 +1063,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       init_epissage=True, init_cabestan=40.0, init_lg_utile=0.0, init_type_d_asservissement = 0):
 ###fonction de fenêtre graphique
 
-   def transformation_voltage_tonnage(x):
-      """FR : Passe du voltage à des tonnes/2.
-      
-      EN : Passes from voltage to tons/2."""
-      return (etalonnage_a * (x**2) + etalonnage_b * x + etalonnage_c)
-   #V
    def retour_aux_entrees():
       """FR : Relance la fonction principale et renvoie l'utilisateur sur la fenêtre
        de saisie des conditions.
@@ -1087,271 +1073,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       enregistrer_fct()
       fenetre_principale.destroy()
    #V
-   def lecture_a_vide():
-         ###fonction renvoyant la valeur lue lorsqu'aucun programme n'est lancé
-         data=recup_data()
-         valeur_en_cours=transformation_voltage_tonnage(data[6]*2)
-         
-         zone_charge_valeur.delete('valeur_charge_actuelle')
-         zone_charge_valeur.create_text(250,75,text=round(valeur_en_cours,2),font=('Arial','100'),tags='valeur_charge_actuelle')
-         
-         valeur_en_cours=round(COEF_VOLTS_TO_MILLIMETERS*capteur_fct(data[7]))
-            
-         zone_valeur.delete('valeur_actuelle')
-         zone_valeur.create_text(75,25,text=valeur_en_cours,font=('Arial','20'),tags='valeur_actuelle')
-         if lire_a_vide.get() == True :
-            zone_valeur.after(500,lecture_a_vide)
-
-   def distance_fct():
-      ###Fenêtre de consigne en position. 
-      ####################################
-      def distance_suite() :
-         ###Fonction qui renvoie la valeur souhaitée si elle se trouve dans l'intervalle de 10-1900 mm
-         if pos_var.get()<=1900 and pos_var.get()>=10 :
-            consigne_fen_bis.destroy()
-            zone_rappel_1.delete('zone1')
-            zone_rappel_1.create_text(125,10,text='Consigne (mm): '+str(pos_var.get()),tags='zone1')
-         else :
-            showwarning('Attention !',"Consigne en position hors de l'intervalle ! Veuillez entrer une nouvelle valeur")
-      def retour_fct() :
-         ###Renvoi à la fenêtre précédente
-         consigne_fen_bis.destroy()
-         return parametrage_fct()
-      ####################################
-
-      consigne_fen_bis=Toplevel(fenetre_principale)
-      consigne_fen_bis.title('Choix déplacement')
-      Label(consigne_fen_bis, text="Veuillez choisir la valeur de position du chariot en mm (entre 10 et 1900) ",fg='blue').grid(row=0,padx =10, pady =10)
-      Spinbox(consigne_fen_bis, from_=10,to=1900,increment=1, textvariable=pos_var, width=30).grid(row=1,padx =10, pady =10)
-      Button(consigne_fen_bis,text='Retour', command=parametrage_fct).grid(row=4,column=0,padx =10, pady =10)
-      Button(consigne_fen_bis,text='Enregistrer', command=distance_suite).grid(row=4,column=2,padx =10, pady =10)
-      bouton_parametrage_consigne['bg']='green'
-      consigne_choix.set(61)
-      activer_bouton(start_btn)
-      rappel_consigne.delete('consigne')
-      rappel_consigne.create_text(125,10,text='Consigne position',tags='consigne') 
-      
-   def parametrage_fct ():
-      ###Fenêtre de choix de la forme de la consigne
-      global verrou_production
-      
-      def parametrage_suite() :
-         ###renvoie la fenêtre suivante
-      ####################################
-         consigne_fen.destroy()
-         parametrage_suite1()
-      ####################################
-      
-      def retour_fct() :
-         ###renvoie la fenêtre précédente
-      ####################################
-         consigne_fen.destroy()
-         choix_du_type_d_asservissement()
-      ####################################
-      
-      consigne_fen=Toplevel(fenetre_principale)
-      Label(consigne_fen, text="Veuillez choisir la forme du signal de la consigne").grid(row=0,column=1,padx =10, pady =10)
-      Radiobutton(consigne_fen, text="Préétirage", variable=consigne_choix, value=11).grid(row=1,column=1,padx =10, pady =10)
-      
-      if verrou_production==0 :
-         Radiobutton(consigne_fen, text="Consigne rampe simple", variable=consigne_choix, value=21).grid(row=2,column=1,padx =10, pady =10)
-         Radiobutton(consigne_fen, text="Consigne par paliers", variable=consigne_choix, value=22).grid(row=3,column=1,padx =10, pady =10)
-         Radiobutton(consigne_fen, text="Rupture iso-2307", variable=consigne_choix, value=23).grid(row=4,column=1,padx =10, pady =10)
-         Radiobutton(consigne_fen, text="Fatigue", variable=consigne_choix, value=31).grid(row=5,column=1,padx =10, pady =10)
-      
-      Button(consigne_fen,text='Suivant', command=parametrage_suite).grid(row=8,column=2,padx =10, pady =10)
-      Button(consigne_fen,text='Retour', command=retour_fct).grid(row=8,column=0,padx =10, pady =10)
-      
-      menu1.entryconfigure(3, state=NORMAL)
-
-   def parametrage_suite1():
-      ###fenêtre de choix des valeurs de la consigne
-      choix=consigne_choix.get()
-      consigne_fen_bis=Toplevel(fenetre_principale)
-      
-      def retour_fct() :
-         ### renvoie la fenêtre précédente
-         consigne_fen_bis.destroy()
-         parametrage_fct()
-         
-      def suivant():
-         ### vérifie les valeurs, enregistre les valeurs et détruit la fenêtre
-         if limite_val.get()>20 or limite_val.get()<0:
-            showwarning('Attention','La valeur limite dépasse les 20 tonnes !')
-            return 0
-         try :
-            if (int(temps_voulu.get()[:1])>60 or int(temps_voulu.get()[3:])>60) :
-               showwarning('Attention','Temps indiqué ('+temps_voulu.get()+') incorrect ! Veuillez respecter le format mm:ss')
-               return 0
-            if (int(temps_palier_final.get()[:1])>60 or int(temps_palier_final.get()[3:])>60) :
-               showwarning('Attention','Temps indiqué ('+temps_voulu.get()+') incorrect ! Veuillez respecter le format mm:ss')
-               return 0
-         except :
-            if (consigne_choix.get()==11 or consigne_choix.get()==22 or consigne_choix.get()==31) :
-               showwarning('Attention','Temps indiqué incorrect ! Veuillez respecter le format mm:ss')
-               return 0
-            
-            
-         if consigne_choix.get()==11 :
-            zone_rappel_1.delete('zone1')
-            zone_rappel_1.create_text(125,10,text='Consigne (tonnes): '+str(limite_val.get()),tags='zone1')
-            zone_rappel_2.delete('zone2')
-            zone_rappel_2.create_text(125,10,text='Temps maintien (mm:ss): '+str(temps_voulu.get()),tags='zone2')
-         
-         if consigne_choix.get()==21 :
-            zone_rappel_1.delete('zone1')
-            zone_rappel_1.create_text(125,10,text='Pente (tonnes/s): '+str(pente_val.get()),tags='zone1')
-            zone_rappel_2.delete('zone2')
-            zone_rappel_2.create_text(125,10,text='Valeur limite (tonnes): '+str(limite_val.get()),tags='zone2')
-            
-         if consigne_choix.get()==22 :
-            zone_rappel_1.delete('zone1')
-            zone_rappel_1.create_text(125,10,text='Pas des paliers (tonnes): '+str(consigne_val.get()),tags='zone1')
-            zone_rappel_2.delete('zone2')
-            zone_rappel_2.create_text(125,10,text='Pente (tonnes/s): '+str(pente_val.get()),tags='zone2')
-            zone_rappel_3.delete('zone3')
-            zone_rappel_3.create_text(125,10,text='Temps de maintien (mm:ss) : '+str(temps_voulu.get()),tags='zone3')
-            zone_rappel_4.delete('zone4')
-            zone_rappel_4.create_text(125,10,text='Valeur limite (tonnes) : '+str(limite_val.get()),tags='zone4')
-            zone_rappel_5.delete('zone5')
-            zone_rappel_5.create_text(125,10,text='Temps final : '+str(temps_palier_final.get()),tags='zone5')
-            
-         if consigne_choix.get()==23 :
-            zone_rappel_1.delete('zone1')
-            zone_rappel_1.create_text(125,10,text='Nombre de cycles : '+str(nb_cycles.get()),tags='zone1')
-            if episse.get()==True:
-               zone_rappel_2.delete('zone2')
-               zone_rappel_2.create_text(125,10,text='Vitesse chariot (mm/min): '+str(pourc_var.get()),tags='zone2')
-            
-         if consigne_choix.get()==31 :
-            zone_rappel_1.delete('zone1')
-            zone_rappel_1.create_text(125,10,text='Valeur haute (tonnes) : '+str(limite_val.get()),tags='zone1')
-            zone_rappel_2.delete('zone2')
-            zone_rappel_2.create_text(125,10,text='Valeur basse (tonnes) : '+str(limite_basse.get()),tags='zone2')
-            zone_rappel_3.delete('zone3')
-            zone_rappel_3.create_text(125,10,text='Temps de maintien (mm:ss) : '+str(temps_voulu.get()),tags='zone3')
-            zone_rappel_4.delete('zone4')
-            zone_rappel_4.create_text(125,10,text='Nombre de cycles : '+str(nb_cycles.get()),tags='zone4')
-         
-         
-         consigne_fen_bis.destroy()
-         return 0
-         
-      if choix==11:
-
-         consigne_fen_bis.title('Préétirage')
-         Label(consigne_fen_bis, text="Veuillez choisir la valeur de la consigne (en tonnes) ").grid(row=0,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=20,increment=0.01, textvariable=limite_val, width=30).grid(row=1,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir le temps de préétirage (en mm:ss)").grid(row=2,padx =10, pady =10)
-         Entry( consigne_fen_bis,textvariable= temps_voulu, width=30).grid(row=3,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Retour', command=retour_fct).grid(row=4,column=0,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Enregistrer', command=suivant).grid(row=4,column=2,padx =10, pady =10)
-         btn=Button(consigne_fen_bis,text='btn')
-         btn.config(image=img11)
-         btn.grid(row=0,column=1,columnspan=2,rowspan=4,padx =10,pady =10)
-         bouton_parametrage_consigne['bg']='green'
-         activer_bouton(start_btn)
-         valeur_minimale_de_déplacement.set(2000)
-         rappel_consigne.delete('consigne')
-         rappel_consigne.create_text(125,10,text='Consigne préétirage',tags='consigne') 
-         
-      if choix==21:
-
-         consigne_fen_bis.title('Rupture rampe simple')
-         Label(consigne_fen_bis, text="Veuillez choisir la valeur de la pente (en tonnes par secondes)").grid(row=1,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=10,increment=0.01, textvariable=pente_val, width=30).grid(row=2,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir une valeur limite de charge (en tonnes)").grid(row=3,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=20,increment=0.1, textvariable=limite_val, width=30).grid(row=4,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir le temps de maintien (en mm:ss)").grid(row=5,padx =10, pady =10)
-         Entry( consigne_fen_bis,textvariable= temps_voulu, width=30).grid(row=6,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Retour', command=retour_fct).grid(row=7,column=0,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Enregistrer', command=suivant).grid(row=7,column=2,padx =10, pady =10)
-         btn=Button(consigne_fen_bis,text='btn')
-         btn.config(image=img21)
-         btn.grid(row=1,column=1,columnspan=2,rowspan=5,padx =10,pady =10)
-         limite_val.set(10)
-         bouton_parametrage_consigne['bg']='green'
-         activer_bouton(start_btn)
-         normes.set('')
-         valeur_minimale_de_déplacement.set(2000)
-         rappel_consigne.delete('consigne')
-         rappel_consigne.create_text(125,10,text='Consigne rampe simple',tags='consigne') 
-            
-      if choix==22:
-
-         consigne_fen_bis.title('Rupture rampe par paliers')
-         Label(consigne_fen_bis, text="Veuillez choisir la valeur du pas des paliers (en tonnes)").grid(row=0,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=20,increment=0.01,  textvariable=consigne_val, width=30).grid(row=1,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir la valeur de la pente (en tonnes par secondes)").grid(row=2,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=1000,increment=0.01,  textvariable=pente_val, width=30).grid(row=3,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir le temps de palier (en mm:ss)").grid(row=4,padx =10, pady =10)
-         Entry( consigne_fen_bis, textvariable= temps_voulu, width=30).grid(row=5,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir une valeur limite de charge (en tonnes)").grid(row=6,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=20,increment=0.1, textvariable=limite_val, width=30).grid(row=7,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir le temps de maintien final(en mm:ss)").grid(row=8,padx =10, pady =10)
-         Entry( consigne_fen_bis,textvariable= temps_palier_final, width=30).grid(row=9,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Retour', command=retour_fct).grid(row=10,column=0,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Enregistrer', command=suivant).grid(row=10,column=2,columnspan=2,padx =10, pady =10)
-         btn=Button(consigne_fen_bis,text='btn')
-         btn.config(image=img22)
-         btn.grid(row=0,column=1,columnspan=2,rowspan=20,padx =10,pady =10)
-         limite_val.set(10)
-         bouton_parametrage_consigne['bg']='green'
-         activer_bouton(start_btn)
-         normes.set('')
-         valeur_minimale_de_déplacement.set(2000)
-         rappel_consigne.delete('consigne')
-         rappel_consigne.create_text(125,10,text='Consigne charge_de_rupture par paliers',tags='consigne') 
-         
-      if choix==23:
-         consigne_fen_bis.title('iso-2307')
-         if episse.get()==True :
-            
-            pourc2=utile.get()*0.02*1000
-            pourc12=utile.get()*0.12*1000
-            pas_scale=Scale(consigne_fen_bis,orient='horizontal',from_=pourc2, to=pourc12, resolution=1,length=150,variable=pourc_var,label='Vitesse (mm/min)')
-            pas_scale.grid(row=3,column=0,padx =10, pady =10)
-
-         coche_label=LabelFrame(consigne_fen_bis, text = "Nombre de cycles (cycles compris entre "+str(round(num_tonnes(int(num_ref.get())),4))+" tonnes et "+str(charge_de_rupture.get()/2)+" tonnes")
-         coche_label.grid(row=4,column=0,padx =10, pady =10)
-         Radiobutton(coche_label, text="3", variable=nb_cycles, value=3).grid(row=4,column=0,padx =10, pady =10)
-         Radiobutton(coche_label, text="10", variable=nb_cycles, value=10).grid(row=5,column=0,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir une valeur limite de charge (en tonnes)").grid(row=6,column=0,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=20,increment=0.1, textvariable=limite_val, width=30).grid(row=7,column=0,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Retour', command=retour_fct).grid(row=8,column=0,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Enregistrer', command=suivant).grid(row=8,column=5,padx =10, pady =10)
-         btn=Button(consigne_fen_bis,text='btn')
-         btn.config(image=img23)
-         btn.grid(row=3,column=5,rowspan=10,padx =10,pady =10)
-         limite_val.set(10)
-         bouton_parametrage_consigne['bg']='green'
-         activer_bouton(start_btn)
-         normes.set('iso-2307')
-         valeur_minimale_de_déplacement.set(2000)
-         rappel_consigne.delete('consigne')
-         rappel_consigne.create_text(125,10,text='Consigne charge_de_rupture iso-2307',tags='consigne') 
-         
-      if choix==31:
-         consigne_fen_bis.title('Fatigue')
-         Label(consigne_fen_bis, text="Veuillez choisir la valeur HAUTE de la consigne (en tonnes)").grid(row=0,padx =10, pady =10)
-         Spinbox(consigne_fen_bis, from_=0,to=20,increment=0.01, textvariable=limite_val, width=30).grid(row=1,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir la valeur BASSE de la consigne (en tonnes)").grid(row=2,padx =10, pady =10)
-         Spinbox( consigne_fen_bis,from_=0,to=20,increment=0.01, textvariable= limite_basse, width=30).grid(row=3,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir le nombre de cycles").grid(row=4,padx =10, pady =10)
-         Spinbox( consigne_fen_bis,from_=0,to=1000000,increment=1, textvariable= nb_cycles, width=30).grid(row=5,padx =10, pady =10)
-         Label(consigne_fen_bis, text="Veuillez choisir le temps de maintient (en mm:ss)").grid(row=6,padx =10, pady =10)
-         Entry( consigne_fen_bis, textvariable= temps_voulu, width=30).grid(row=7,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Retour', command=retour_fct).grid(row=8,column=0,padx =10, pady =10)
-         Button(consigne_fen_bis,text='Enregistrer', command=suivant).grid(row=8,column=2,padx =10, pady =10)
-         btn=Button(consigne_fen_bis,text='btn')
-         btn.config(image=img31)
-         btn.grid(row=0,column=1,columnspan=2,rowspan=10,padx =10,pady =10)
-         bouton_parametrage_consigne['bg']='green'
-         activer_bouton(start_btn)
-         valeur_minimale_de_déplacement.set(2000)
-         rappel_consigne.delete('consigne')
-         rappel_consigne.create_text(125,10,text='Consigne fatigue',tags='consigne')
-            
    def enregistrer_et_quitter():
       """FR : Fenêtre de choix des données à enregistrer avant de quitter ou relancer.
       
@@ -1474,9 +1195,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          chartsheet.activate()
          
          workbook.close()
-         fichier_csv_1.close()
-         fichier_csv_2.close()
-         fichier_csv_3.close()
          match choix_des_documents_a_enregistrer.get() :
             case 0 :
                suppression_d_un_fichier(nom)
@@ -1493,55 +1211,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                suppression_d_un_fichier(nom_csv)
                suppression_d_un_fichier(nom_csv3)
       
-   def stop_crappy():
-      """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
-      
-      EN : Stops Crappy and resets the valves' distributors."""
-      activer_bouton(bouton_enregistrer_et_quitter)
-      desactiver_bouton(pause_btn)
-      # activer_bouton(bouton_parametrage_consigne)
-      # activer_bouton(enregistrer_btn)
-      activer_bouton(mise_a_0_btn)
-      activer_bouton(mise_a_tension_btn)
-      menu1.entryconfigure(4, state=NORMAL)
-
-      while len(liste_des_blocs_crappy_utilises) > 0 :
-         liste_des_blocs_crappy_utilises.pop().stop()
-      crappy.stop()
-      crappy.reset()
-
-      gen = crappy.blocks.Generator(path=[{'type': 'constant',
-                              'value': 0,
-                              'condition': "delay=0.01"}],
-                        cmd_label='commande_en_charge',
-                        spam=True)
-
-      carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
-                                    labels=["t(s)", "sortie_charge", "sortie_deplacement"],
-                                    cmd_labels=["commande_en_charge", "commande_en_charge"],
-                                    initial_cmd=[0.0, 0.0],
-                                    exit_values=[0.0, 0.0],
-                                    channels=[{'name': 'Dev2/ao0'},
-                                    {'name': 'Dev2/ao1'},
-                                    {'name': 'Dev2/ai6'},
-                                    {'name': 'Dev2/ai7'}])
-
-      crappy.link(gen, carte_NI)
-      Thread(target = crappy.start).start()
-      time.sleep(3)
-      carte_NI.stop()
-      gen.stop()
-      crappy.stop()
-      crappy.reset()
-
-   def start_crappy():
-      """FR : Lance Crappy et empêche de le relancer dans le même test.
-      
-      EN : Launches Crappy and disables launching it again in the same test."""
-      desactiver_bouton(start_btn)
-      activer_bouton(pause_btn)
-      launch_crappy_event.set()
-
    def certif_fct ():
       ###fenêtre de choix du certificat créé
       def entree_certif ():
@@ -1792,114 +1461,21 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       Button(fen_choix_certif, text='Retour',command=fen_choix_certif.destroy).grid(row=6,column=1,padx =10, pady =10)
       Button(fen_choix_certif, text='Suivant',command=entree_certif).grid(row=6,column=3,padx =10, pady =10)
 
-   def color_on() :
-      ###fonction de coloration des boutons du mode manuel en mode 'on'
-      off_button['bg']='gray'
-      activer_bouton(start_btn)
-   
-   def color_off() :
-      ###fonction de coloration des boutons du mode manuel en mode 'off'
-      on_button['bg']='gray'
-      desactiver_bouton(start_btn)
-         
-   def mise_a_0_fct():
-      ###fonction de mise à la position 0 du chariot
-      type_d_asservissement.set(2)
-      consigne_choix.set(62)
-      desactiver_bouton(mise_a_0_btn)
-      desactiver_bouton(mise_a_tension_btn)
-      rappel_asserv.delete('asservissement')
-      rappel_asserv.create_text(125,10,text='Asservissement en position',tags='asservissement')
-      rappel_consigne.delete('consigne')
-      rappel_consigne.create_text(125,10,text=' ',tags='consigne')
-      zone_rappel_1.delete('zone1')
-      zone_rappel_1.create_text(125,10,text='Mise à 0 position',tags='zone1')
-      zone_rappel_2.delete('zone2')
-      zone_rappel_3.delete('zone3')
-      zone_rappel_4.delete('zone4')
-      stop_crappy()
-      return start_crappy()
-      
-   def mise_a_tension_fct():
-      ### fonction de mise à la charge du chariot
-      type_d_asservissement.set(2)
-      consigne_choix.set(63)
-      desactiver_bouton(mise_a_0_btn)
-      desactiver_bouton(mise_a_tension_btn)
-      rappel_asserv.delete('asservissement')
-      rappel_asserv.create_text(125,10,text='Asservissement en position',tags='asservissement')
-      rappel_consigne.delete('consigne')
-      rappel_consigne.create_text(125,10,text=' ',tags='consigne')
-      zone_rappel_1.delete('zone1')
-      zone_rappel_1.create_text(125,10,text='Mise en tension',tags='zone1')
-      zone_rappel_2.delete('zone2')
-      zone_rappel_3.delete('zone3')
-      zone_rappel_4.delete('zone4')
-      stop_crappy()
-      return start_crappy()
-   
  #TODO : Gérer les différents PID et leur réglage. 
  #       Voir sensi_page() et reglage_des_coef_des_PID() dans les fonctions jetées.
 
    def reinitialiser ():
       ###fonction de réinitialisation de la consigne et des valeurs utilisé lors de l'animation
       
-      lire_a_vide.set(True)
       choix_des_documents_a_enregistrer.set(1)
-      valeur_minimale_de_déplacement.set(2000)
-      valeur_maximale_de_déplacement.set(-10000)
-      valeur_maximale_de_charge.set(-10000)
-      consigne_choix.set(0) 
-      consigne_val.set(0) 
-      memoire_consigne.set(0)
-      pente_val.set(0)
-      limite_val.set(0)
-      decharge.set(0)
-      limite_basse.set(0)
-      nb_cycles.set(0)
-      temps_voulu.set('00:00')
-      temps_palier_final.set('00:00')
-      pos_var.set(0)
-      rappel_asserv.delete('asservissement')
-      rappel_asserv.create_text(125,10,text=' ',tags='asservissement')
-      rappel_consigne.delete('consigne')
-      rappel_consigne.create_text(125,10,text=' ',tags='consigne') 
-      zone_rappel_1.delete('zone1')
-      zone_rappel_1.create_text(125,10,text=' ',tags='zone1')
-      zone_rappel_2.delete('zone2')
-      zone_rappel_2.create_text(125,10,text=' ',tags='zone2')
-      zone_rappel_3.delete('zone3')
-      zone_rappel_3.create_text(125,10,text=' ',tags='zone3')
-      zone_rappel_4.delete('zone4')
-      zone_rappel_4.create_text(125,10,text=' ',tags='zone4')
       
       desactiver_bouton(start_btn)
       activer_bouton(bouton_enregistrer_et_quitter)
       desactiver_bouton(pause_btn)
       
-      menu1.entryconfigure(1, state=DISABLED)
-      menu1.entryconfigure(2, state=DISABLED)
-      menu1.entryconfigure(3, state=DISABLED)
-      
       showinfo('Info','Consigne réinitialisée !')
       return 0
-   
-   def fenetre_d_affichage_secondaire():
-      """FR : Crée une fenêtre secondaire affichant la consigne en plus gros.
-      
-      EN : Creates a secondary window that prints the setpoint bigger."""
-      def anim_second():
-         data=recup_data()
-         valeur_en_cours=transformation_voltage_tonnage(data[6]*2)
-         canvas_second.delete('valeur_charge_actuelle')
-         canvas_second.create_text(500,500,text=round(valeur_en_cours,2),font=('Arial','200'),tags='valeur_charge_actuelle')
-         canvas_second.after(500,anim_second)
-      #V
-      fenetre_affichage_secondaire=Toplevel(fenetre_principale)
-      canvas_second=Canvas(fenetre_affichage_secondaire,height=1000,width=1000,bg='#ffffff')
-      canvas_second.grid()
-      anim_second()
-   #V
+
    def modif_etalonnage_fct():
       ###fenêtre de modification du mot de passe
       def modif_etalonnage_suite():
@@ -2393,96 +1969,106 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          for widget in cadre_interne_consignes.winfo_children() :
             widget.destroy()
 
-         Button(cadre_interne_consignes, text = "Insérer une consigne au départ", command = lambda : surcouche_ajout(0)).grid(row = 0, column = 1, padx = 5, pady = 12)
          if verrou_production == OFF :
             Button(cadre_interne_consignes, text = "Charger depuis un fichier", command = chargement_des_consignes).grid(row = 0, column = 0, padx = 5, pady = 12)
+            Button(cadre_interne_consignes, text = "Insérer une consigne au départ", command = lambda : surcouche_ajout(0)).grid(row = 0, column = 1, padx = 5, pady = 12)
             Button(cadre_interne_consignes, text = "Enregistrer dans un fichier", command = enregistrement_des_consignes).grid(row = 0, column = 2, padx = 5, pady = 12)
-         if len(consignes_du_generateur) :
-            Label(cadre_interne_consignes, text = "Consigne(s) actuellement prévue(s) :").grid(row = 1, column = 0, columnspan = 3, padx = 5, pady = 4)
-            indice_de_cette_consigne = 0
-            for consigne_du_generateur in consignes_du_generateur :
-               indice_de_cette_consigne += 1
-               label_de_cette_consigne = ""
-               match consigne_du_generateur['type'] :
-                  case "ramp" :
-                     label_de_cette_consigne = f"Rampe simple de {2 * consigne_du_generateur['speed']}T/s"
-                     condition_d_arret = consigne_du_generateur["condition"]
-                     if condition_d_arret is None :
-                        label_de_cette_consigne += ", dure indéfiniment"
-                     elif condition_d_arret.startswith('delay') :
-                        label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                     else :
-                        label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
-                  case "constant" :
-                     label_de_cette_consigne = "Palier à "
-                     label_de_cette_consigne += f"{2 * consigne_du_generateur['value']}T"
-                     condition_d_arret = consigne_du_generateur["condition"]
-                     if condition_d_arret is None :
-                        label_de_cette_consigne += ", dure indéfiniment"
-                     elif condition_d_arret.startswith('delay') :
-                        label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                     else :
-                        label_de_cette_consigne += f" maintenu jusqu'à atteindre {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
-                  case "cyclic_ramp" :
-                     label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de rampes : "
-                     label_de_cette_consigne += f"{2 * consigne_du_generateur['speed1']}T/s"
-                     condition_d_arret = consigne_du_generateur["condition1"]
-                     if condition_d_arret.startswith('delay') :
-                        label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                     else :
-                        label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
-                     label_de_cette_consigne += f", {2 * consigne_du_generateur['speed2']}T/s"
-                     condition_d_arret = consigne_du_generateur["condition2"]
-                     if condition_d_arret.startswith('delay') :
-                        label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                     else :
-                        label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
-                  case "cyclic" :
-                     label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de paliers : "
-                     label_de_cette_consigne += f"{2 * consigne_du_generateur['value1']}T"
-                     condition_d_arret = consigne_du_generateur["condition1"]
-                     if condition_d_arret.startswith('delay') :
-                        label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                     else :
-                        label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
-                     label_de_cette_consigne += f", {2 * consigne_du_generateur['value2']}T"
-                     condition_d_arret = consigne_du_generateur["condition2"]
-                     if condition_d_arret.startswith('delay') :
-                        label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                     else :
-                        label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
-                  case "sine" :
-                     label_de_cette_consigne = f"Sinus allant de {2 * (consigne_du_generateur['offset'] - consigne_du_generateur['amplitude'] / 2)}T à {2 * (consigne_du_generateur['offset'] + consigne_du_generateur['amplitude'] / 2)}T, de période {1 / consigne_du_generateur['freq']}s, démarrant "
-                     match int(consigne_du_generateur['phase'] * 2 / pi + 0.05) :
-                        case 0 :
-                           label_de_cette_consigne += "croissant au centre"
-                        case 1 :
-                           label_de_cette_consigne += "à son maximum"
-                        case 2 :
-                           label_de_cette_consigne += "décroissant au centre"
-                        case 3 :
-                           label_de_cette_consigne += "à son minimum"
-                     condition_d_arret = consigne_du_generateur["condition"]
-                     if condition_d_arret is None :
-                        label_de_cette_consigne += ", dure indéfiniment"
-                     else :
-                        label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
+            if len(consignes_du_generateur) :
+               Label(cadre_interne_consignes, text = "Consigne(s) actuellement prévue(s) :").grid(row = 1, column = 0, columnspan = 3, padx = 5, pady = 4)
+               indice_de_cette_consigne = 0
+               for consigne_du_generateur in consignes_du_generateur :
+                  indice_de_cette_consigne += 1
+                  label_de_cette_consigne = ""
+                  match consigne_du_generateur['type'] :
+                     case "ramp" :
+                        label_de_cette_consigne = f"Rampe simple de {2 * consigne_du_generateur['speed']}T/s"
+                        condition_d_arret = consigne_du_generateur["condition"]
+                        if condition_d_arret is None :
+                           label_de_cette_consigne += ", dure indéfiniment"
+                        elif condition_d_arret.startswith('delay') :
+                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                        else :
+                           label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
+                     case "constant" :
+                        label_de_cette_consigne = "Palier à "
+                        label_de_cette_consigne += f"{2 * consigne_du_generateur['value']}T"
+                        condition_d_arret = consigne_du_generateur["condition"]
+                        if condition_d_arret is None :
+                           label_de_cette_consigne += ", dure indéfiniment"
+                        elif condition_d_arret.startswith('delay') :
+                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                        else :
+                           label_de_cette_consigne += f" maintenu jusqu'à atteindre {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                     case "cyclic_ramp" :
+                        label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de rampes : "
+                        label_de_cette_consigne += f"{2 * consigne_du_generateur['speed1']}T/s"
+                        condition_d_arret = consigne_du_generateur["condition1"]
+                        if condition_d_arret.startswith('delay') :
+                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                        else :
+                           label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
+                        label_de_cette_consigne += f", {2 * consigne_du_generateur['speed2']}T/s"
+                        condition_d_arret = consigne_du_generateur["condition2"]
+                        if condition_d_arret.startswith('delay') :
+                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                        else :
+                           label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
+                     case "cyclic" :
+                        label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de paliers : "
+                        label_de_cette_consigne += f"{2 * consigne_du_generateur['value1']}T"
+                        condition_d_arret = consigne_du_generateur["condition1"]
+                        if condition_d_arret.startswith('delay') :
+                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                        else :
+                           label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                        label_de_cette_consigne += f", {2 * consigne_du_generateur['value2']}T"
+                        condition_d_arret = consigne_du_generateur["condition2"]
+                        if condition_d_arret.startswith('delay') :
+                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                        else :
+                           label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                     case "sine" :
+                        label_de_cette_consigne = f"Sinus allant de {2 * (consigne_du_generateur['offset'] - consigne_du_generateur['amplitude'] / 2)}T à {2 * (consigne_du_generateur['offset'] + consigne_du_generateur['amplitude'] / 2)}T, de période {1 / consigne_du_generateur['freq']}s, démarrant "
+                        match int(consigne_du_generateur['phase'] * 2 / pi + 0.05) :
+                           case 0 :
+                              label_de_cette_consigne += "croissant au centre"
+                           case 1 :
+                              label_de_cette_consigne += "à son maximum"
+                           case 2 :
+                              label_de_cette_consigne += "décroissant au centre"
+                           case 3 :
+                              label_de_cette_consigne += "à son minimum"
+                        condition_d_arret = consigne_du_generateur["condition"]
+                        if condition_d_arret is None :
+                           label_de_cette_consigne += ", dure indéfiniment"
+                        else :
+                           label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
 
-               cadre_de_cette_consigne = LabelFrame(cadre_interne_consignes)
-               cadre_de_cette_consigne.grid(row = (2 * indice_de_cette_consigne), column = 0, columnspan = 3, padx = 5, pady = 4, sticky = 'w' + 'e')
-               Label(cadre_de_cette_consigne, text = label_de_cette_consigne).grid(row = 1, column = 0, padx = 5, pady = 4, sticky = 'w')
-               label_du_numero_de_bloc = Label(cadre_interne_consignes, text = f"Bloc {indice_de_cette_consigne}")
-               label_du_numero_de_bloc.grid(row = (2 * indice_de_cette_consigne), column = 0, padx = 5, pady = 0, sticky = 'nw')
-               # fenetre_de_choix_des_consignes.wm_attributes('-transparentcolor', label_du_numero_de_bloc['bg'])
-               # Label(cadre_de_cette_consigne, image = PhotoImage(file = DOSSIER_CONFIG_ET_CONSIGNES + "rampe simple.png")).grid(row = 1, column = 0, padx = 5, pady = 5)
-               Button(cadre_de_cette_consigne, text = "Supprimer cette consigne", command = lambda i = indice_de_cette_consigne - 1 : suppression_d_une_consigne(i)).grid(row = 1, column = 1, padx = 5, pady = 5)
-               Button(cadre_de_cette_consigne, text = "Modifier cette consigne", command = lambda i = indice_de_cette_consigne - 1 : surcouche_modification(i)).grid(row = 1, column = 2, padx = 5, pady = 5, sticky = 'e')
-               Button(cadre_interne_consignes, text = "Insérer une consigne", command = lambda i = indice_de_cette_consigne : surcouche_ajout(i)).grid(row = (2 * indice_de_cette_consigne + 1), column = 1, padx = 5, pady = 5, sticky = 'e')
-               cadre_interne_consignes.columnconfigure(0, weight=1)
-               cadre_interne_consignes.columnconfigure(1, weight=1)
-               cadre_interne_consignes.columnconfigure(2, weight=1)
+                  cadre_de_cette_consigne = LabelFrame(cadre_interne_consignes)
+                  cadre_de_cette_consigne.grid(row = (2 * indice_de_cette_consigne), column = 0, columnspan = 3, padx = 5, pady = 4, sticky = 'w' + 'e')
+                  Label(cadre_de_cette_consigne, text = label_de_cette_consigne).grid(row = 1, column = 0, padx = 5, pady = 4, sticky = 'w')
+                  label_du_numero_de_bloc = Label(cadre_interne_consignes, text = f"Bloc {indice_de_cette_consigne}")
+                  label_du_numero_de_bloc.grid(row = (2 * indice_de_cette_consigne), column = 0, padx = 5, pady = 0, sticky = 'nw')
+                  # fenetre_de_choix_des_consignes.wm_attributes('-transparentcolor', label_du_numero_de_bloc['bg'])
+                  # Label(cadre_de_cette_consigne, image = PhotoImage(file = DOSSIER_CONFIG_ET_CONSIGNES + "rampe simple.png")).grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Button(cadre_de_cette_consigne, text = "Supprimer cette consigne", command = lambda i = indice_de_cette_consigne - 1 : suppression_d_une_consigne(i)).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  Button(cadre_de_cette_consigne, text = "Modifier cette consigne", command = lambda i = indice_de_cette_consigne - 1 : surcouche_modification(i)).grid(row = 1, column = 2, padx = 5, pady = 5, sticky = 'e')
+                  Button(cadre_interne_consignes, text = "Insérer une consigne", command = lambda i = indice_de_cette_consigne : surcouche_ajout(i)).grid(row = (2 * indice_de_cette_consigne + 1), column = 1, padx = 5, pady = 5, sticky = 'e')
+                  cadre_interne_consignes.columnconfigure(0, weight=1)
+                  cadre_interne_consignes.columnconfigure(1, weight=1)
+                  cadre_interne_consignes.columnconfigure(2, weight=1)
+         else :
+            if len(consignes_du_generateur) :
+               Label(cadre_interne_consignes, text = "Consigne actuellement prévue :").grid(row = 0, column = 0, columnspan = 3, padx = 5, pady = 4)
+               label_de_cette_consigne = f"Tire le cable à {2 * consignes_du_generateur[2]['speed']}T/s"
+               label_de_cette_consigne += f" jusqu'à {str(2 * float(consignes_du_generateur[2]['condition'][DEBUT_CONDITION_CHARGE:]))}T"
+               Label(cadre_interne_consignes, text = label_de_cette_consigne).grid(row = 1, column = 0, columnspan = 3, padx = 5, pady = 4, sticky = 'we')
+
          Button(cadre_interne_consignes, text = "Annuler les changements", command = annulation_des_changements).grid(row = (2 * NOMBRE_DE_CONSIGNES_MAXIMAL + 2), column = 0, padx = 5, pady = 5)
-         Button(cadre_interne_consignes, text = "Tout supprimer", command = suppression_de_toutes_les_consignes).grid(row = (2 * NOMBRE_DE_CONSIGNES_MAXIMAL + 2), column = 1, padx = 5, pady = 5)
+         if verrou_production == OFF :
+            Button(cadre_interne_consignes, text = "Tout supprimer", command = suppression_de_toutes_les_consignes).grid(row = (2 * NOMBRE_DE_CONSIGNES_MAXIMAL + 2), column = 1, padx = 5, pady = 5)
+         else :
+            Button(cadre_interne_consignes, text = "Modifier", command = lambda : surcouche_modification(2)).grid(row = (2 * NOMBRE_DE_CONSIGNES_MAXIMAL + 2), column = 1, padx = 5, pady = 5)
          Button(cadre_interne_consignes, text = "Valider", command = validation_des_consignes).grid(row = (2 * NOMBRE_DE_CONSIGNES_MAXIMAL + 2), column = 2, padx = 5, pady = 5)
       #V
 
@@ -2534,7 +2120,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       if entrees[10]:
          pass # rajouter des trucs pour ISO-2307
       parametres.append('')
-      labels_voulus = ["t(s)", "Consigne(T)", "sortie_charge", "sortie_charge_transformee", "Charge (Tonnes)", "sortie_deplacement"]
+      labels_voulus = ["t(s)", "Consigne(T)", "sortie_charge_brute", "sortie_charge_transformee", "Charge (Tonnes)", "sortie_position_brute"]
       launch_crappy_event.wait()
       launch_crappy_event.clear()
       if launch_crappy_confirm :
@@ -2547,11 +2133,65 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                            labels_a_enregistrer = labels_voulus)
          else :
             #TODO : demarrage_de_crappy_deplacement
+            global fake_test
+            fake_test = True
             demarrage_de_crappy_fake_machine(consignes_generateur = consignes_du_generateur, 
                            fichier_d_enregistrement = str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                               #TODO : add lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt")
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
+
+   def start_crappy():
+      """FR : Lance Crappy et empêche de le relancer dans le même test.
+      
+      EN : Launches Crappy and disables launching it again in the same test."""
+      desactiver_bouton(start_btn)
+      activer_bouton(pause_btn)
+      launch_crappy_event.set()
+      print("debug1")
+      time.sleep(5)
+      print("debug2")
+      fenetre_principale.lift()
+
+   def stop_crappy():
+      """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
+      
+      EN : Stops Crappy and resets the valves' distributors."""
+      activer_bouton(bouton_enregistrer_et_quitter)
+      desactiver_bouton(pause_btn)
+      # activer_bouton(enregistrer_btn)
+      # activer_bouton(mise_a_0_btn)
+      # activer_bouton(mise_a_tension_btn)
+      menu1.entryconfigure(2, state=NORMAL)
+
+      while len(liste_des_blocs_crappy_utilises) > 0 :
+         liste_des_blocs_crappy_utilises.pop().stop()
+      crappy.stop()
+      crappy.reset()
+      if not fake_test :
+         gen = crappy.blocks.Generator(path=[{'type': 'constant',
+                                 'value': 0,
+                                 'condition': "delay=0.01"}],
+                           cmd_label='commande_en_charge',
+                           spam=True)
+
+         carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
+                                       labels=["t(s)", "sortie_charge_brute", "sortie_position_brute"],
+                                       cmd_labels=["commande_en_charge", "commande_en_charge"],
+                                       initial_cmd=[0.0, 0.0],
+                                       exit_values=[0.0, 0.0],
+                                       channels=[{'name': 'Dev2/ao0'},
+                                       {'name': 'Dev2/ao1'},
+                                       {'name': 'Dev2/ai6'},
+                                       {'name': 'Dev2/ai7'}])
+
+         crappy.link(gen, carte_NI)
+         Thread(target = crappy.start).start()
+         time.sleep(3)
+         carte_NI.stop()
+         gen.stop()
+         crappy.stop()
+         crappy.reset()
 
 ##################################################################################################################################
 
@@ -2574,19 +2214,25 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             consignes_du_generateur = []
          #TODO : précharger test ISO à la place
       elif entrees[11] :
-         type_d_asservissement = choix_du_type_d_asservissement(type_d_asservissement)
-         try :
-            if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
-               fichier_des_consignes_du_dernier_test = open(DOSSIER_CONFIG_ET_CONSIGNES + "consignes_du_test_precedent_charge.json", 'r')
-            elif type_d_asservissement == ASSERVISSEMENT_EN_DEPLACEMENT :
-               fichier_des_consignes_du_dernier_test = open(DOSSIER_CONFIG_ET_CONSIGNES + "consignes_du_test_precedent_deplacement.json", 'r')
+         if verrou_production == OFF :
+            type_d_asservissement = choix_du_type_d_asservissement(type_d_asservissement)
+            try :
+               if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
+                  fichier_des_consignes_du_dernier_test = open(DOSSIER_CONFIG_ET_CONSIGNES + "consignes_du_test_precedent_charge.json", 'r')
+               elif type_d_asservissement == ASSERVISSEMENT_EN_DEPLACEMENT :
+                  fichier_des_consignes_du_dernier_test = open(DOSSIER_CONFIG_ET_CONSIGNES + "consignes_du_test_precedent_deplacement.json", 'r')
+               if type_d_asservissement != 0 :
+                  consignes_du_generateur = load(fichier_des_consignes_du_dernier_test)
+                  fichier_des_consignes_du_dernier_test.close()
+            except FileNotFoundError :
+               showwarning("Ah ben tiens...", "Aucun test n'a été effectué précédemment.")
+               consignes_du_generateur = []
             if type_d_asservissement != 0 :
+               choix_des_consignes_du_generateur()
+         else :
+            type_d_asservissement = ASSERVISSEMENT_EN_CHARGE
+            with open(DOSSIER_CONFIG_ET_CONSIGNES + "consignes_du_test_precedent_production.json", 'r') as fichier_des_consignes_du_dernier_test :
                consignes_du_generateur = load(fichier_des_consignes_du_dernier_test)
-               fichier_des_consignes_du_dernier_test.close()
-         except FileNotFoundError :
-            showwarning("Ah ben tiens...", "Aucun test n'a été effectué précédemment.")
-            consignes_du_generateur = []
-         if type_d_asservissement != 0 :
             choix_des_consignes_du_generateur()
       else :
          type_d_asservissement = choix_du_type_d_asservissement(type_d_asservissement)
@@ -2610,10 +2256,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    num_ref.set(entrees[5])
    episse=IntVar()
    episse.set(entrees[7])
-   pourc_var=DoubleVar()
 
    # Le reste trié
-   lire_a_vide=BooleanVar()
    choix_des_documents_a_enregistrer=IntVar()
    choix_des_documents_a_enregistrer.set(0)
    charge_de_rupture=DoubleVar()
@@ -2624,24 +2268,11 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    valeur_minimale_de_déplacement.set(2000)
    valeur_maximale_de_charge=DoubleVar()
    valeur_maximale_de_charge.set(-10000)
-   consigne_choix = IntVar() # le bordel qui devrait utiliser des flags
 
    # vrac
-   consigne_val = DoubleVar()
-   memoire_consigne=DoubleVar()
-   pente_val=DoubleVar()
-   limite_val=DoubleVar()
-   decharge=IntVar()
    tonnage_max=IntVar()
-   limite_basse=DoubleVar()
-   nb_cycles=IntVar()
-   temps_voulu = StringVar()
-   temps_voulu.set('00:00')
    mode_manuel=StringVar()
    mode_manuel.set('off')
-   temps_palier_final=StringVar()
-   temps_palier_final.set('00:00')
-   pos_var=DoubleVar()
 
    # PDF
    societe=StringVar()
@@ -2686,26 +2317,17 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    # chartsheet = workbook.add_chartsheet()
    # feuille = workbook.add_worksheet()
 
-   # nom_csv=crea_nom(2)
-   # fichier_csv_1=open(nom_csv,'w')
-   
-   # nom_csv2=crea_nom(3)
-   # fichier_csv_2=open(nom_csv2,'w')
-   
-   # nom_csv3=crea_nom(4)
-   # fichier_csv_3=open(nom_csv3,'w')
-   
    # init_xlsx()
    # init_csv(entrees[0],entrees[1],entrees[2],str(entrees[3]))
    
    ##### Organisation de l'affichage #####
-   # liste_des_ecrans = get_monitors()
-   # indice_ecran = 0
-   # while indice_ecran < len(liste_des_ecrans) and not liste_des_ecrans[indice_ecran].is_primary :
-   #    indice_ecran +=1    # Cherche l'écran principal.
-   # largeur_de_l_ecran = liste_des_ecrans[indice_ecran].width
-   largeur_de_l_ecran = 1440
-   canvas=Canvas(fenetre_principale, height=int(largeur_de_l_ecran * 9/16),width=largeur_de_l_ecran)
+   liste_des_ecrans = get_monitors()
+   indice_ecran = 0
+   while indice_ecran < len(liste_des_ecrans) and not liste_des_ecrans[indice_ecran].is_primary :
+      indice_ecran +=1    # Cherche l'écran principal.
+   largeur_de_l_ecran = liste_des_ecrans[indice_ecran].width
+   # largeur_de_l_ecran = 1440
+   canvas=Canvas(fenetre_principale, height=int(largeur_de_l_ecran * 9/16 / 3),width = largeur_de_l_ecran / 3)
    canvas.grid(column=0, row=0, columnspan = 1, sticky=(N, W, E, S))
    width_scrollbar = ttk.Scrollbar(fenetre_principale, orient = HORIZONTAL, command = canvas.xview)
    width_scrollbar.grid(column=0, row=1, sticky=(W, E))
@@ -2726,56 +2348,15 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    canvas.rowconfigure(0, weight=1)
    canvas.columnconfigure(0, weight=1)
 
-   val_actuelle_label=LabelFrame(cadre_interne, text = 'Valeur position (mm)', fg='red')
-   mini_label=LabelFrame(cadre_interne, text = 'Valeur minimale', fg='red')
-   maxi_label=LabelFrame(cadre_interne, text = 'Valeur maximale', fg='red')
-   val_actuelle_charge_label=LabelFrame(cadre_interne, text = 'Valeur charge (t)', fg='green')
-   maxi_charge_label=LabelFrame(cadre_interne, text = 'Valeur maximale', fg='green')
-   consigne_label=LabelFrame(cadre_interne, text = 'Consigne', fg='blue')
-   temps_total_label=LabelFrame(cadre_interne, text = 'Temps total')
-   temps_fin_label=LabelFrame(cadre_interne, text = 'Temps de fonctionnement (en min)')
    zone_com_label=LabelFrame(cadre_interne, text = 'Commentaires')
-   temps_restant_label=LabelFrame(cadre_interne, text = 'Temps restant')
-   cadre_mode_manuel=LabelFrame(cadre_interne, text='Mode Manuel')
-   rappel_label=LabelFrame(cadre_interne, text='Consigne')
-   rappel_asserv=Canvas(rappel_label,height=20,width=250,bg='#ffffff')
-   rappel_consigne=Canvas(rappel_label,height=20,width=250,bg='#ffffff')      
-   zone_rappel_1=Canvas(rappel_label,height=20,width=250,bg='#ffffff')
-   zone_rappel_2=Canvas(rappel_label,height=20,width=250,bg='#ffffff')
-   zone_rappel_3=Canvas(rappel_label,height=20,width=250,bg='#ffffff')
-   zone_rappel_4=Canvas(rappel_label,height=20,width=250,bg='#ffffff')
-   zone_rappel_5=Canvas(rappel_label,height=20,width=250,bg='#ffffff')
-   rappel_asserv.create_text(125,10,text=' ',tags='asservissement')
-   rappel_consigne.create_text(125,10,text=' ',tags='consigne') 
-   zone_rappel_1.create_text(125,10,text=' ',tags='zone1')
-   zone_rappel_2.create_text(125,10,text=' ',tags='zone2')
-   zone_rappel_3.create_text(125,10,text=' ',tags='zone3')
-   zone_rappel_4.create_text(125,10,text=' ',tags='zone4')
-   zone_rappel_5.create_text(125,10,text=' ',tags='zone5')
-   # cadre_courbe = Canvas(cadre_interne)
-   # super_figure_ou_sera_placee_la_courbe = plt.figure()
-   # cadre_courbe = FigureCanvasTkAgg(super_figure_ou_sera_placee_la_courbe, master = cadre_interne)
-   # print(super_figure_ou_sera_placee_la_courbe)
-   # super_figure_ou_sera_placee_la_courbe.add_subplot()
-
-   zone_temps_restant=Canvas(temps_restant_label,height=20,width=100,bg='#ffffff')
-   zone_temps_consigne=Canvas(temps_total_label,height=20,width=100,bg='#ffffff') 
-   zone_valeur=Canvas(val_actuelle_label,height=50,width=150,bg='#ffffff')
-   zone_charge_valeur=Canvas(val_actuelle_charge_label,height=150,width=500,bg='#ffffff')
-   zone_max=Canvas(maxi_label,height=20,width=100,bg='#ffffff')
-   zone_min=Canvas(mini_label,height=20,width=100,bg='#ffffff')            
-   zone_charge_max=Canvas(maxi_charge_label,height=20,width=100,bg='#ffffff')
-   zone_consigne=Canvas(consigne_label,height=20,width=100,bg='#ffffff') 
 
    zone_com=Entry( zone_com_label, textvariable= commentaires_de_l_utilisateur, width=25)
    
    start_btn=Button(cadre_interne, text='Start', command=start_crappy)
    pause_btn=Button(cadre_interne, text='Pause', command=stop_crappy,bg='red')
    bouton_enregistrer_et_quitter=Button(cadre_interne, text='Quitter et enregistrer', command=enregistrer_et_quitter)
-   mise_a_0_btn=Button(cadre_interne, text=' Mise à 0 ',command=mise_a_0_fct)
-   mise_a_tension_btn=Button(cadre_interne, text=' Mise à tension ',command=mise_a_tension_fct)
-   off_button = Radiobutton(cadre_mode_manuel, text=" Off ", variable=mode_manuel,indicatoron=False,value="off",command=color_off)
-   on_button = Radiobutton(cadre_mode_manuel, text=" On ", variable=mode_manuel,indicatoron=False, bg='gray',value="on",command=color_on)
+   # mise_a_0_btn=Button(cadre_interne, text=' Mise à 0 ',command=mise_a_0_fct)
+   # mise_a_tension_btn=Button(cadre_interne, text=' Mise à tension ',command=mise_a_tension_fct)
    # bouton_parametrage_consigne = Button(cadre_interne, text=' ',bg='red',command=choix_du_type_d_asservissement)
    enregistrer_btn=Button(cadre_interne, text=' ', command=choix_des_documents_a_consever)
    
@@ -2784,83 +2365,29 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    img2 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_engrenage.png") # make sure to add "/" not "\"
    # bouton_parametrage_consigne.config(image=img2)
    img3 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_retour.png") # make sure to add "/" not "\"
-   mise_a_0_btn.config(image=img3)
+   # mise_a_0_btn.config(image=img3)
    img6 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_play.png") # make sure to add "/" not "\"
    start_btn.config(image=img6)
    img7 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_stop.png") # make sure to add "/" not "\"
    pause_btn.config(image=img7)
    img8 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_tension.png") # make sure to add "/" not "\"
-   mise_a_tension_btn.config(image=img8)
-   img11 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "pree_image.png") # make sure to add "/" not "\"
-   img21 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "rampe_image.png") # make sure to add "/" not "\"
-   img22 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "palier_image.png") # make sure to add "/" not "\"
-   img23 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "iso_image.png") # make sure to add "/" not "\"
-   img31 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "fatigue_image.png") # make sure to add "/" not "\"
+   # mise_a_tension_btn.config(image=img8)
+   # img11 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "pree_image.png") # make sure to add "/" not "\"
+   # img21 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "rampe_image.png") # make sure to add "/" not "\"
+   # img22 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "palier_image.png") # make sure to add "/" not "\"
+   # img23 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "iso_image.png") # make sure to add "/" not "\"
+   # img31 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "fatigue_image.png") # make sure to add "/" not "\"
    
-   
-   # bal = tix.Balloon(cadre_interne)
-   # bal.bind_widget(start_btn, msg="Démarrer le test")
-   # bal.bind_widget(pause_btn, msg="Arrêter le test")
-   # bal.bind_widget(mise_a_0_btn, msg="Renvoie le chariot à la position 0")
-   # bal.bind_widget(mise_a_tension_btn, msg="Avance le chariot jusqu'à détection de tension")
-   # bal.bind_widget(off_button, msg="Désactive le mode d'acquisition en manuel")
-   # bal.bind_widget(on_button, msg="Active l'acquisition en manuel")
-   # bal.bind_widget(bouton_enregistrer_et_quitter, msg="Termine le programme et enregistre les courbes")
-   # bal.bind_widget(bouton_parametrage_consigne, msg="Paramétrer la consigne")
-   # bal.bind_widget(enregistrer_btn, msg="Options d'enregistrements")
-   
-   # bal.bind_widget(zone_temps_restant, msg="Temps restant avant la prochaine phase du programme en cours (en hh:mm:ss)")
-   # bal.bind_widget(zone_temps_consigne, msg="Temps écoulé depuis la dernière phase du programme en cours (en hh:mm:ss)")
-   # bal.bind_widget(zone_valeur, msg="Déplacement chariot actuel (mm)")
-   # bal.bind_widget(zone_charge_valeur, msg="Charge actuelle (tonnes)")
-   # bal.bind_widget(zone_charge_max, msg="Valeur de charge maximale atteinte (tonnes)")
-   # bal.bind_widget(zone_max, msg="Valeur de position maximale du chariot au lancement du programme (mm)")
-   # bal.bind_widget(zone_min, msg="Valeur de position minimale du chariot au lancement du programme (mm)")
-   # bal.bind_widget(zone_com, msg="Entrez ici un commentaire qui sera ajouté au document enregistré")
-   # bal.bind_widget(zone_consigne, msg="Affiche la consigne en cours")
-
-   val_actuelle_label.grid(row=0,column=7,rowspan=2,padx =5, pady =5)
-   val_actuelle_charge_label.grid(row=0,column=1,rowspan=2,padx =5, pady =5)
-   zone_valeur.grid(row=0,column=7,rowspan=2,padx =5, pady =5)
-   zone_charge_valeur.grid(row=0,column=1,rowspan=2,padx =5, pady =5)
-   temps_total_label.grid(row=0,column=11,padx =5, pady =5)
-   zone_temps_consigne.grid(row=0,column=11,padx =5, pady =5)
-   temps_fin_label.grid(row=0,column=11,padx =5, pady =5)
-   temps_restant_label.grid(row=1 ,column=11,padx =5, pady =5)
-   zone_temps_restant.grid(row=1,column=11,padx =5, pady =5)
-   
-   mini_label.grid(row=1,column=9,padx =5, pady =5)
-   maxi_label.grid(row=1,column=8,padx =5, pady =5)
-   maxi_charge_label.grid(row=0,column=8,padx =5, pady =5)
-   consigne_label.grid(row=0,column=9,padx =5, pady =5)
-   zone_max.grid(row=1,column=8,padx =5, pady =5)
-   zone_min.grid(row=1,column=8,padx =5, pady =5)
-   zone_charge_max.grid(row=0,column=8,padx =5, pady =5)
-   zone_consigne.grid(row=0,column=9,padx =5, pady =5)
    start_btn.grid(row=0,column=13,padx =5, pady =5)
    pause_btn.grid(row=0,column=14,columnspan=2,padx =5, pady =5)
    bouton_enregistrer_et_quitter.grid(row=2,column=18,padx =5, pady =5)
    # bouton_parametrage_consigne.grid(row=1,column=14,padx =5, pady =5)
    enregistrer_btn.grid(row=1,column=15,padx =5, pady =5)
-   mise_a_0_btn.grid(row=0,column=17,padx =5, pady =5)
-   mise_a_tension_btn.grid(row=1,column=17,padx =5, pady =5)
-   cadre_mode_manuel.grid(row=0,column=18,padx =5, pady =5)
-   off_button.grid(row=1,column=20,padx =5, pady =5)
-   on_button.grid(row=1,column=19,padx =5, pady =5)
+   # mise_a_0_btn.grid(row=0,column=17,padx =5, pady =5)
+   # mise_a_tension_btn.grid(row=1,column=17,padx =5, pady =5)
    zone_com.grid(row=1 ,column=18,columnspan=3,padx =5, pady =5)
    zone_com_label.grid(row=1 ,column=18,columnspan=3,padx =5, pady =5)
-   
-   rappel_label.grid(row=4 ,column=18,padx =5, pady =5)
-   rappel_asserv.grid(row=5 ,column=18,padx =5, pady =5)
-   rappel_consigne.grid(row=6 ,column=18,padx =5, pady =5)
-   zone_rappel_1.grid(row=7 ,column=18,padx =5, pady =5)
-   zone_rappel_2.grid(row=8 ,column=18,padx =5, pady =5)
-   zone_rappel_3.grid(row=9 ,column=18,padx =5, pady =5)
-   zone_rappel_4.grid(row=10 ,column=18,padx =5, pady =5)
-   zone_rappel_5.grid(row=10 ,column=18,padx =5, pady =5)
-   
-   # cadre_courbe._tkcanvas.grid(row = 4, column = 0, columnspan = 15, padx = 0, pady = 0)
-   
+
    activer_bouton(start_btn)
    activer_bouton(bouton_enregistrer_et_quitter)
    activer_bouton(pause_btn)
@@ -2868,17 +2395,10 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    menubar = Menu(fenetre_principale)
 
    menu1 = Menu(menubar, tearoff=0)
-   
-   menu1.add_command(label="Type d'asservissement")#,command=choix_du_type_d_asservissement)
-   menu1.add_command(label="Choix du test",command=distance_fct)
-   menu1.add_command(label="Valeurs consignes",command=parametrage_fct)
-   menu1.add_command(label="Valeur charge",command=parametrage_suite1)
+   menu1.add_command(label="Type d'asservissement")#,command = choix_du_type_d_asservissement)
    menu1.add_command(label="Réinitialiser consigne",command=reinitialiser)
    menubar.add_cascade(label="Consigne", menu=menu1)
-   
-   menu1.entryconfigure(1, state=DISABLED)
-   menu1.entryconfigure(2, state=DISABLED)
-   menu1.entryconfigure(3, state=DISABLED)
+
    
    menu2 = Menu(menubar, tearoff=0)
    menu2.add_command(label="Choix documents",command=choix_des_documents_a_consever)
@@ -2886,7 +2406,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    
    menu3 = Menu(menubar, tearoff=0)
    menu3.add_command(label="Certificat",command=certif_fct)
-   menu3.add_command(label="Ecran secondaire",command=fenetre_d_affichage_secondaire)
+   # menu3.add_command(label="Ecran secondaire",command=fenetre_d_affichage_secondaire)
    menubar.add_cascade(label="Créer", menu=menu3)
    
    menu4 = Menu(menubar, tearoff=0)
