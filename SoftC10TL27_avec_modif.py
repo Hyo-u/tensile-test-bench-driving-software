@@ -18,13 +18,18 @@ from screeninfo import get_monitors
 ### Création de PDF
 import PIL
 # from Pillow import Image
-from reportlab import pdfgen
+from reportlab.pdfgen import canvas as cvpdf
 from reportlab.lib.pagesizes import A4
+from win32com.client import Dispatch   # pip install pywin32
 
 ### Imports pour CRAPPy
 import crappy
 import customblocks
-import matplotlib
+import custom_generator
+# import custom_multiplex
+# import custom_grapher
+# import custom_dashboard
+# import custom_recorder
 
 ### Divers
 from numpy import pi
@@ -38,11 +43,8 @@ import sys
 import random
 
 ### Potentiellement à virer. À vérifer
-# import nidaqmx
 # import xlsxwriter
-# from win32com.client import Dispatch
 
-matplotlib.use("Agg")
 
 # Coefficients de changement d'unité
 COEF_VOLTS_TO_MILLIMETERS = 200
@@ -67,6 +69,7 @@ LABEL_SORTIE_EN_CHARGE = "sortie_charge_transformee"
 LABEL_SORTIE_EN_POSITION = "sortie_position_transformee"
 DEBUT_CONDITION_TEMPS = len("delay=")
 DEBUT_CONDITION_CHARGE = len(LABEL_SORTIE_EN_CHARGE) + 1
+DEBUT_CONDITION_POSITION = len(LABEL_SORTIE_EN_POSITION) + 1
 
 # Types d'asservissement
 ASSERVISSEMENT_EN_CHARGE = 1
@@ -92,9 +95,12 @@ DOSSIER_ENREGISTREMENTS = lecture_donnee("dossier_enregistrements.txt") + SEPARA
 liste_des_blocs_crappy_utilises = []  
 launch_crappy_event = Event()
 launch_crappy_confirm = True
+stop_crappy_event = Event()
+test_effectue = False
 charge_max = -10
 position_min = 2000
 position_max = -10
+tonnage_limite = 20
 
 alphabet=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
 next_available_letter=0
@@ -143,6 +149,7 @@ def suppression_d_un_fichier(file_name) :
       except FileNotFoundError :
          showwarning("Attention", "Fichier " + file_name + " non trouvé")
 #V
+### Fonctions de conversions d'unité
 def volts_to_tons(volts) :
    """FR : Convertit des volts en tonnes.
    
@@ -155,7 +162,7 @@ def tons_to_volts(tons) :
    EN : Converts tons in volts."""
    return round(tons/2, 2)
 #V
-### Fonctions utilisées pour les entrées des utilisateurs
+### Fonctions de vérification des entrées des utilisateurs
 def _check_entree_charge(new_value):
    """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
    
@@ -166,6 +173,28 @@ def _check_entree_charge(new_value):
       return False
    new_value = float(new_value)
    return new_value >= 0.0 and new_value <= 20.0
+#V
+def _check_entree_charge_prod(new_value):
+   """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
+   
+   EN : Prevent the user from entering incorrect values."""
+   if new_value == "" :
+      return True
+   if re.match("^[0-9]+\.?[0-9]*$", new_value) is None and re.match("^[0-9]*\.?[0-9]+$", new_value) is None :
+      return False
+   new_value = float(new_value)
+   return new_value >= 0.0 and new_value <= 10.0
+#V
+def _check_entree_position(new_value):
+   """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
+   
+   EN : Prevent the user from entering incorrect values."""
+   if new_value == "" :
+      return True
+   if re.match("^[0-9]+\.?[0-9]*$", new_value) is None and re.match("^[0-9]*\.?[0-9]+$", new_value) is None :
+      return False
+   new_value = float(new_value)
+   return new_value >= 0.0 and new_value <= 2000.0
 #V
 def _check_entree_longueur(new_value):
    """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
@@ -188,6 +217,17 @@ def _check_entree_vitesse_charge(new_value):
       return False
    new_value = float(new_value)
    return new_value >= -20.0 and new_value <= 20.0
+#V
+def _check_entree_vitesse_position(new_value):
+   """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
+   
+   EN : Prevent the user from entering incorrect values."""
+   if new_value == "" or new_value == '-' :
+      return True
+   if re.match("^-?[0-9]+\.?[0-9]*$", new_value) is None and re.match("^-?[0-9]*\.?[0-9]+$", new_value) is None :
+      return False
+   new_value = float(new_value)
+   return new_value >= -2000.0 and new_value <= 2000.0
 #V
 def _check_entree_temps(new_value):
    """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
@@ -245,17 +285,21 @@ def _on_mousewheel(widget, event):
 ### Fonctions servant de modificateurs aux liens CRAPPy
 #TODO : variables d'étalonnage plutôt que constantes
 #        préciser les unités et d'autres trucs
-def _card_to_pid(dic):
+def _card_to_pid_and_generator(dic):
    """FR : Étalonne la tension renvoyée par le capteur d'efforts.
    
    EN : Calibrates the voltage fed back by the effort sensor."""
-   if "sortie_charge_brute" not in dic.keys() :
+   if "sortie_charge_brute" not in dic.keys() or "sortie_position_brute" not in dic.keys() :
       dic["t(s)"] = time.time()
-      dic ["sortie_charge_transformee"] = 0.0
+      dic [LABEL_SORTIE_EN_CHARGE] = 0.0
+      dic[LABEL_SORTIE_EN_POSITION] = 0.0
       return dic
    x = 2 * dic["sortie_charge_brute"]
-   dic["sortie_charge_transformee"] = (etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2
-   return dic  # Faire des test pour vérifier s'il y a vraiment besoin du 2 * <> /2.
+   dic[LABEL_SORTIE_EN_CHARGE] = (etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2
+   dic[LABEL_SORTIE_EN_POSITION] = transformation_capteur_de_position(dic["sortie_position_brute"])
+   # if dic[LABEL_SORTIE_EN_CHARGE] > (20 * COEF_TONS_TO_VOLTS) and (2 * COEF_MILLIMETERS_TO_VOLTS) < dic[LABEL_SORTIE_EN_POSITION] < (1900 * COEF_MILLIMETERS_TO_VOLTS) :
+   #    stop_crappy()
+   return dic
 
 def _gen_to_graph_in_tons(dic):
    if "consigne" not in dic.keys() :
@@ -267,8 +311,9 @@ def _gen_to_graph_in_tons(dic):
    return dic
 
 def _card_to_recorder_and_graph(dic) :
-   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge_brute"]
-   # dic["sortie_position_brute"] = <fonction de la sortie en déplacement>
+   dic = _card_to_pid_and_generator(dic)
+   dic["Charge (T)"] = 2 * dic[LABEL_SORTIE_EN_CHARGE]
+   dic["Position (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic[LABEL_SORTIE_EN_POSITION]
    return dic
 
 def _pid_to_card_charge(dic) :
@@ -293,11 +338,11 @@ def _gen_to_dashboard(dic) :
 
 def _card_to_dashboard(dic) :
    global charge_max, position_max, position_min
-   dic["Charge (Tonnes)"] = 2 * _card_to_pid(dic)["sortie_charge_brute"]
-   if dic["Charge (Tonnes)"] > charge_max :
-      charge_max = dic["Charge (Tonnes)"]
+   dic = _card_to_recorder_and_graph(dic)
+   if dic["Charge (T)"] > charge_max :
+      charge_max = dic["Charge (T)"]
    dic["Charge max (T)"] = charge_max
-   sortie_position_en_mm = dic["sortie_position_brute"] * COEF_VOLTS_TO_MILLIMETERS
+   sortie_position_en_mm = dic["Position (mm)"]
    if sortie_position_en_mm > position_max :
       position_max = sortie_position_en_mm
    dic["Position max (mm)"] = position_max
@@ -310,12 +355,6 @@ def _card_to_dashboard(dic) :
 def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistrement = None,
                               parametres_du_test = [], labels_a_enregistrer = None):
    """TODO"""
-   gen = crappy.blocks.Generator(path = consignes_generateur,
-                                 cmd_label = 'consigne',
-                                 spam = True,
-                                 freq = 50)
-   liste_des_blocs_crappy_utilises.append(gen)
-
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
                                     labels = ["t(s)", "sortie_charge_brute", 
                                              "sortie_position_brute"],
@@ -336,9 +375,9 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
-                                 target_label='consigne',
-                                 labels=["t(s)", 'entree_charge'],
-                                 input_label='sortie_charge_transformee',
+                                 target_label = 'consigne',
+                                 labels = ["t(s)", 'entree_charge'],
+                                 input_label = LABEL_SORTIE_EN_CHARGE,
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
@@ -348,33 +387,31 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     out_max=5,
                                     out_min=-5,
                                     i_limit=0.5,
-                                    target_label='consigne',
-                                    labels=["t(s)", 'entree_decharge'],
-                                    input_label='sortie_charge_transformee',
+                                    target_label = 'consigne',
+                                    labels = ["t(s)", 'entree_decharge'],
+                                    input_label = LABEL_SORTIE_EN_CHARGE,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_decharge)
 
-   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
-                                                "sortie_charge_transformee"],
+   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(y_charge)
 
-   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
-                                                "sortie_charge_transformee"],
+   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
    graphe = customblocks.EmbeddedGrapher(("t(s)", "Consigne(T)"), 
-                                          ("t(s)", "Charge (Tonnes)"),
+                                          ("t(s)", "Charge (T)"),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
 
-   # pancarte = crappy.blocks.Dashboard(labels = ["t(s)"],#["Temps (s)", "Consigne (T)", "Position (mm)", "Charge (T)", "Charge max (T)", "Position min (mm)", "Position max (mm)"],
-   #                                     freq = 5)
-   # liste_des_blocs_crappy_utilises.append(pancarte)
+   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "Temps (s)", "Consigne (T)", "Position (mm)", "Charge (T)", "Charge max (T)", "Position min (mm)", "Position max (mm)"],
+                                       freq = 5)
+   liste_des_blocs_crappy_utilises.append(pancarte)
 
    if fichier_d_enregistrement is not None :
       record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
@@ -382,29 +419,36 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
 
+   gen = crappy.blocks.Generator(path = consignes_generateur,
+                                 cmd_label = 'consigne',
+                                 spam = True,
+                                 freq = 50,
+                                 blocks_list = liste_des_blocs_crappy_utilises)
+   liste_des_blocs_crappy_utilises.append(gen)
+
    crappy.link(gen, y_charge)
    crappy.link(gen, y_decharge)
-   crappy.link(carte_NI, y_charge, modifier=_card_to_pid)
-   crappy.link(carte_NI, y_decharge, modifier=_card_to_pid)
+   crappy.link(carte_NI, y_charge, modifier=_card_to_pid_and_generator)
+   crappy.link(carte_NI, y_decharge, modifier=_card_to_pid_and_generator)
    crappy.link(y_charge, pid_charge)
    crappy.link(y_decharge, pid_decharge)
    crappy.link(pid_charge, carte_NI, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
-   crappy.link(carte_NI, gen, modifier=_card_to_pid)
+   crappy.link(carte_NI, gen, modifier=_card_to_pid_and_generator)
 
    crappy.link(gen, y_record, modifier = _gen_to_graph_in_tons)
    crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
-   crappy.link(carte_NI, y_record, modifier=
-                           [_card_to_recorder_and_graph, 
-                           crappy.modifier.Diff(label="sortie_charge_transformee", 
-                                                out_label="derivee_voltage")])
+   crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph) 
+                           # [_card_to_recorder_and_graph, 
+                           # crappy.modifier.Diff(label = LABEL_SORTIE_EN_CHARGE, 
+                           #                      out_label = "derivee_voltage")])
    if fichier_d_enregistrement is not None :
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
    crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
-   # crappy.link(gen, pancarte, modifier = _gen_to_dashboard)
-   # crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
+   crappy.link(gen, pancarte, modifier = _gen_to_dashboard)
+   crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
 
    crappy.start()
    crappy.reset()
@@ -412,23 +456,17 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
 def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enregistrement = None,
                         parametres_du_test = [], labels_a_enregistrer = None):
    """TODO"""
-   gen = crappy.blocks.Generator(path = consignes_generateur,
-                                 cmd_label = 'consigne',
-                                 spam = True,
-                                 freq = 50)
-   liste_des_blocs_crappy_utilises.append(gen)
-
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
                                     labels = ["t(s)", "sortie_charge_brute", 
                                              "sortie_position_brute"],
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
-                                    channels=[{'name': 'Dev2/ao0'},
+                                    channels = [{'name': 'Dev2/ao0'},
                                     {'name': 'Dev2/ao1'},
                                     {'name': 'Dev2/ai6'},
                                     {'name': 'Dev2/ai7'}],
-                                    spam=True,
+                                    spam = True,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
 
@@ -438,9 +476,9 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
-                                 target_label='consigne',
-                                 labels=["t(s)", 'entree_charge'],
-                                 input_label='sortie_charge_transformee',
+                                 target_label = 'consigne',
+                                 labels = ["t(s)", 'entree_charge'],
+                                 input_label = LABEL_SORTIE_EN_POSITION,
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
@@ -450,29 +488,32 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                     out_max=5,
                                     out_min=-5,
                                     i_limit=0.5,
-                                    target_label='consigne',
-                                    labels=["t(s)", 'entree_decharge'],
-                                    input_label='sortie_charge_transformee',
+                                    target_label = 'consigne',
+                                    labels = ["t(s)", 'entree_decharge'],
+                                    input_label = LABEL_SORTIE_EN_POSITION,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_decharge)
 
-   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
-                                                "sortie_charge_transformee"],
+   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(y_charge)
 
-   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", 
-                                                "sortie_charge_transformee"],
+   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
    graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
-                                          ("t(s)", "sortie_charge_transformee"),
+                                          ("t(s)", LABEL_SORTIE_EN_CHARGE),
+                                          ("t(s)", LABEL_SORTIE_EN_POSITION),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
+
+   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "Temps (s)", "Consigne (T)", "Position (mm)", "Charge (T)", "Charge max (T)", "Position min (mm)", "Position max (mm)"],
+                                       freq = 5)
+   liste_des_blocs_crappy_utilises.append(pancarte)
 
    if fichier_d_enregistrement is not None :
       record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
@@ -480,39 +521,49 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
 
+   gen = custom_generator.Generator(path = consignes_generateur,
+                                 cmd_label = 'consigne',
+                                 spam = True,
+                                 freq = 50,
+                              blocks_list = liste_des_blocs_crappy_utilises)
+   liste_des_blocs_crappy_utilises.append(gen)
 
    crappy.link(gen, y_charge)
    crappy.link(gen, y_decharge)
-   crappy.link(carte_NI, y_charge, modifier=_card_to_pid)
-   crappy.link(carte_NI, y_decharge, modifier=_card_to_pid)
+   crappy.link(carte_NI, y_charge, modifier=_card_to_pid_and_generator)
+   crappy.link(carte_NI, y_decharge, modifier=_card_to_pid_and_generator)
    crappy.link(y_charge, pid_charge)
    crappy.link(y_decharge, pid_decharge)
    crappy.link(pid_charge, carte_NI, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
-   crappy.link(carte_NI, gen, modifier=_card_to_pid)
+   crappy.link(carte_NI, gen, modifier=_card_to_pid_and_generator)
 
    crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
-   crappy.link(carte_NI, y_record, modifier=
-                           [_card_to_recorder_and_graph, 
-                           crappy.modifier.Diff(label="sortie_charge_transformee", 
-                                                out_label="derivee_voltage")])
+   crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph)
+                           # [_card_to_recorder_and_graph, 
+                           # crappy.modifier.Diff(label = LABEL_SORTIE_EN_POSITION, 
+                           #                      out_label = "derivee_voltage")])
    if fichier_d_enregistrement is not None :
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
    crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
+   crappy.link(gen, pancarte, modifier = _gen_to_dashboard)
+   crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
 
    crappy.start()
    crappy.reset()
 
 def carte_to_gen(dic):
-   dic["sortie_charge_transformee"] = 2 * dic["F(N)"] / 9.807 / 1000
-   # print(dic["sortie_charge_transformee"])
+   dic[LABEL_SORTIE_EN_POSITION] = 2 * dic["F(N)"] / 9.807 / 1000
+   # if dic[LABEL_SORTIE_EN_POSITION]  > 2 :
+   #    stop_crappy()
+   #    dic[LABEL_SORTIE_EN_POSITION] = "safeguard"
    return dic
 
 def carte_to_pid(dic):
-   dic["sortie_charge_transformee"] = dic["F(N)"] / 9.807 / 1000
-   # print(dic["sortie_charge_transformee"])
+   dic[LABEL_SORTIE_EN_POSITION] = dic["F(N)"] / 9.807 / 1000
+   # print(dic[LABEL_SORTIE_EN_POSITION])
    return dic
 
 def plastic(v: float, yield_strain: float = .005, rate: float = .02) -> float:
@@ -522,12 +573,6 @@ def plastic(v: float, yield_strain: float = .005, rate: float = .02) -> float:
 
 def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enregistrement = None,
                         parametres_du_test = [], labels_a_enregistrer = None):
-   gen = crappy.blocks.Generator(path = consignes_generateur,
-                              cmd_label = 'consigne',
-                              spam = True,
-                              freq = 50)
-   liste_des_blocs_crappy_utilises.append(gen)
-
    carte_NI = crappy.blocks.Fake_machine(k = 10000*450,
                                           l0 = 4000,
                                           maxstrain = 7,
@@ -544,14 +589,14 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
-                                 target_label="consigne",
-                                 labels=["t(s)", 'entree_charge'],
-                                 input_label='sortie_charge_transformee',
+                                 target_label = "consigne",
+                                 labels = ["t(s)", 'entree_charge'],
+                                 input_label = LABEL_SORTIE_EN_POSITION,
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
    graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
-                              ("t(s)", "sortie_charge_transformee"),
+                              ("t(s)", LABEL_SORTIE_EN_POSITION),
                               freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
@@ -570,10 +615,18 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
 
-   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "F(N)", "sortie_charge_transformee"],
+   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "F(N)", LABEL_SORTIE_EN_POSITION],
                                        freq = 5)
    liste_des_blocs_crappy_utilises.append(pancarte)
 
+   gen = crappy.blocks.Generator(path = consignes_generateur,
+                              cmd_label = 'consigne',
+                              spam = True,
+                              freq = 50
+                              # , blocks_list = liste_des_blocs_crappy_utilises.copy()
+                              )
+   liste_des_blocs_crappy_utilises.append(gen)
+   
    crappy.link(gen, y_charge)
    crappy.link(carte_NI, y_charge, modifier = carte_to_gen)
    crappy.link(y_charge, pid_charge)
@@ -589,6 +642,49 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
 
    crappy.start()
    crappy.reset()
+   return
+
+def stop_crappy():
+   """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
+   
+   EN : Stops Crappy and resets the valves' distributors."""
+   print("_______________\n" + str(liste_des_blocs_crappy_utilises) + "\n_____________")
+   while len(liste_des_blocs_crappy_utilises) > 0 :
+      bloc_a_supprimer = liste_des_blocs_crappy_utilises.pop()
+      bloc_a_supprimer.stop()
+      try :
+         crappy.blocks.Block.instances.remove(bloc_a_supprimer)
+      except KeyError:
+         pass
+   crappy.stop()
+   crappy.reset()
+   
+   if not fake_test  and __name__ == "__main__":
+      gen = crappy.blocks.Generator(path=[{'type': 'constant',
+                                          'value': 0,
+                                          'condition': "delay=0.01"}],
+                                    cmd_label='commande_en_charge',
+                                    spam=True)
+
+      carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
+                                       labels=["t(s)", "sortie_charge_brute", "sortie_position_brute"],
+                                       cmd_labels=["commande_en_charge", "commande_en_charge"],
+                                       initial_cmd=[0.0, 0.0],
+                                       exit_values=[0.0, 0.0],
+                                       channels=[{'name': 'Dev2/ao0'},
+                                                {'name': 'Dev2/ao1'},
+                                                {'name': 'Dev2/ai6'},
+                                                {'name': 'Dev2/ai7'}])
+
+      crappy.link(gen, carte_NI)
+      Thread(target = crappy.start).start()
+      time.sleep(3)
+      carte_NI.stop()
+      gen.stop()
+      crappy.stop()
+      crappy.reset()
+   if __name__ == "__main__" :
+      print("--------------debug------------------")
 
 def coef_PID_par_defaut():
    """FR : Renvoie la liste des coefficients par défaut de tous les PID.
@@ -744,52 +840,12 @@ def coef_PID_par_defaut():
    liste_coef.append(D_decharge_pal)
    
    return liste_coef
-#V  
-def capteur_fct(x):
+#V
+def transformation_capteur_de_position(x):
 #TODO : constantes WTF
    #convertion tension lue par le capteur ultrason -> tension étalonnée pour ne pas dépasser les valeurs limites en distance
-   fonction=(x-2.18)*5/4.08
-   return fonction 
+   return (x-2.18)*5/4.08 
 
-def num_tonnes(x):
-#TODO : constantes WTF liées à l'iso 2307
-   ###fonction de conversion du numéro de référence à la tension de référence.
-   fonction=(0.01*x**2/8)/9.807  # +-5%
-   return fonction
-  
-def verif_pos(position_list,value) :
-   """FR : Vérifie si la position du chariot est à "value".
-   
-   EN : Asserts if the test trolley is at "value"."""
-   valid=0
-   while valid < len(position_list) and position_list[valid] >= value-1 and position_list[valid] <= value+1 :
-            valid+=1
-   if valid==len(position_list) :
-      return True
-   return False
-#V
-def verif_valeur(load_list,value):
-   """FR : Vérifie si la charge est à "value".
-   
-   EN : Asserts if the load is at "value"."""
-   valid=0
-   while valid < len(load_list) and \
-      (value != 0 and load_list[valid]>=value-0.1 and load_list[valid]<=value+0.1 \
-      or load_list[valid]>=0.01307 and load_list[valid]<=0.01309) :
-         valid += 1
-   if valid==len(load_list) :
-      return True
-   return False
-#V
-def verif_rupture(liste) :
-   """FR : Vérifie s'il y a charge_de_rupture.
-   
-   EN : Asserts if charge_de_rupture happens."""
-   for i in range(len(liste)-1):
-      if liste[i+1]<liste[i]*0.3 and liste[i+1]>1 :
-         return True
-   return False
-#V
 def desactiver_bouton(btn):
    """FR : Désactive le bouton.
    
@@ -1114,7 +1170,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       Button(fenetre_de_sortie_du_programme,text='Relancer un essai', command=relancer_un_essai).grid(row=5,column=1,padx =10, pady =10)
       Button(fenetre_de_sortie_du_programme,text='Quitter', command=quitter).grid(row=5,column=2,padx =10, pady =10)
    #V        
-   def choix_des_documents_a_consever():
+   def choix_des_documents_a_conserver():
       """FR : Fenêtre de choix des documents à conserver.
       
       EN : Files to keep choice window."""
@@ -1123,37 +1179,37 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          
          EN : Sets back the previous choice and closes this window."""
          choix_des_documents_a_enregistrer.set(choix_actuel)
-         enregistrer_fen.destroy()
+         fenetre_de_choix_des_doc_a_conserver.destroy()
       #V
       choix_actuel = choix_des_documents_a_enregistrer.get()
-      enregistrer_fen=Toplevel(fenetre_principale)
-      enregistrer_fen.protocol("WM_DELETE_WINDOW", annulation)
+      fenetre_de_choix_des_doc_a_conserver=Toplevel(fenetre_principale)
+      fenetre_de_choix_des_doc_a_conserver.protocol("WM_DELETE_WINDOW", annulation)
       
-      Label(enregistrer_fen, text="Veuillez choisir les documents à enregistrer").grid(row=0,column=1,padx =10, pady =10)
-      Radiobutton(enregistrer_fen, text="aucun document", variable=choix_des_documents_a_enregistrer, value=0).grid(row=1,column=1,padx =10, pady =10)
-      Radiobutton(enregistrer_fen, text="valeurs étalonnées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=1).grid(row=2,column=1,padx =10, pady =10)
+      Label(fenetre_de_choix_des_doc_a_conserver, text="Veuillez choisir les documents à enregistrer").grid(row=0,column=1,padx =10, pady =10)
+      Radiobutton(fenetre_de_choix_des_doc_a_conserver, text="aucun document", variable=choix_des_documents_a_enregistrer, value=0).grid(row=1,column=1,padx =10, pady =10)
+      Radiobutton(fenetre_de_choix_des_doc_a_conserver, text="valeurs étalonnées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=1).grid(row=2,column=1,padx =10, pady =10)
       if verrou_production==0 :
-         Radiobutton(enregistrer_fen, text="valeurs affichées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=2).grid(row=3,column=1,padx =10, pady =10)
-         Radiobutton(enregistrer_fen, text="valeurs affichées et étalonnées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=3).grid(row=4,column=1,padx =10, pady =10)
-      Button(enregistrer_fen,text='Retour', command=annulation).grid(row=5,column=0,padx =10, pady =10)
-      Button(enregistrer_fen,text='Suivant', command=enregistrer_fen.destroy).grid(row=5,column=2,padx =10, pady =10)
+         Radiobutton(fenetre_de_choix_des_doc_a_conserver, text="valeurs affichées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=2).grid(row=3,column=1,padx =10, pady =10)
+         Radiobutton(fenetre_de_choix_des_doc_a_conserver, text="valeurs affichées et étalonnées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=3).grid(row=4,column=1,padx =10, pady =10)
+      Button(fenetre_de_choix_des_doc_a_conserver,text='Retour', command=annulation).grid(row=5,column=0,padx =10, pady =10)
+      Button(fenetre_de_choix_des_doc_a_conserver,text='Suivant', command=fenetre_de_choix_des_doc_a_conserver.destroy).grid(row=5,column=2,padx =10, pady =10)
    #V
    def enregistrer_fct():
    ###fenêtre d'enregistrement des valeurs. Créé les courbes, ferme les documents csv et excel, détruit les documents non voulu.
-      # pour créer le .xlsx :
-      nom_du_fichier_xlsx = lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt"
-                              ) + str(datetime.datetime.now())[:11] + entrees[0] + ".xlsx"
-      if path.exists(nom_du_fichier_xlsx):
-         # If the file already exists, append a number to the name
-         nom_du_fichier, extension = path.splitext(nom_du_fichier_xlsx)
-         i = 1
-         while path.exists(nom_du_fichier + "_%05d" % i + extension):
-            i += 1
-         nom_du_fichier_xlsx = nom_du_fichier + "_%05d" % i + extension
-      # print(nom_du_fichier_xlsx, "debug xlsx")
       #TODO : Maintenant qu'on a un nom, faudrait ptet le remplir. Je vais essayer de voir si y a 
       #       d'exporter le .csv en .xlsx, puis de rajouter les courbes.
-         
+      if test_effectue :
+         # créer le doc excel
+         pass
+      else :
+         choix_des_documents_a_enregistrer.set(0)
+      match choix_des_documents_a_enregistrer.get() :
+         case 1:
+            pass
+         case 2 :
+            pass
+         case 3 :
+            pass
       if False : # Juste pour pouvoir collapse la fonction. Mettre en commentaire empêche de collapse.
          chart= workbook.add_chart({'type': 'scatter','subtype' : 'straight'})
          colonne1="".join(['=Sheet1!','$D$','2',':','$D$',str(compteur_pointeur.get())])
@@ -1210,12 +1266,11 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             case 3 :
                suppression_d_un_fichier(nom_csv)
                suppression_d_un_fichier(nom_csv3)
-      
-   def certif_fct ():
-      ###fenêtre de choix du certificat créé
-      def entree_certif ():
+
+   def creation_de_certificat ():
+      ##fenêtre de choix du certificat créé
+      def entrees_du_certificat ():
       ########################
-         ###fonction renvoyant à la fenêtre suivante
          match type_de_certificat.get() :
             case 1 :
                epreuve.set('Certificat de fatigue')
@@ -1225,40 +1280,28 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                epreuve.set("Certificat d'épreuve")
             case 4:
                epreuve.set('Certificat de préétirage')
-         
-         fen_choix_certif.destroy()
            ###fenêtre des entrées du certificat 
-         def suivant_fct():
+         def creation_du_certificat_rempli():
             ###fonction de création du pdf
-            if askyesno('Attention',"Assurez vous d'avoir coché un choix d'enregistrement avant la création du certificat ! De plus, la création d'un certififat entraîne un arrêt du programme. Êtes vous sûr(e) de vouloir continuer ?") :
+            if askyesno("Attention","Il faut enregistrer l'essai avant de créer le certificat. Continuer ?") :
+               choix_des_documents_a_conserver()
+               enregistrer_fct()
 
                today=datetime.datetime.now()
-
                an=str(today.year)[2:]
                mois=str(today.month)
                jour=str(today.day)
-               
                if len(mois)==1:
                   mois = '0' + mois
-                  
                if len(jour)==1:
                   jour = '0' + jour
-                  
                date = jour + '/' + mois + '/' + an
                generate_pdf(date,commentaires_de_l_utilisateur.get(),str(valeur_maximale_de_charge.get()),reference.get(),epreuve.get(),materiau.get(),projet.get(),nom_prenom.get(),banc.get(),commande.get(),contact3.get(),contact2.get(),contact1.get(),adresse3.get(),adresse2.get(),adresse1.get(),societe.get(),normes.get(),validite.get())
                showinfo('Bravo','Certificat créé !')
-               fen_choix_certif.destroy()
+               fenetre_de_choix_du_type_de_certificat.destroy()
                
-               desactiver_bouton(start_btn)
                activer_bouton(bouton_enregistrer_et_quitter)
-               desactiver_bouton(pause_btn)
-               desactiver_bouton(bouton_parametrage_consigne)
                desactiver_bouton(enregistrer_btn)
-         
-         def retour_certif ():
-            ###renvoi à la fenêtre précédente 
-            fen_choix_certif.destroy()
-            certif_fct()
             
          def generate_pdf(date,com,maxi,ref,nature,mat_test,projet,operateur,mat_util,commande,contact3,contact2,contact1,adresse3,adresse2,adresse1,societe,normes,validite):
             ###fonction utilisant les entrées pour créer le pdf
@@ -1266,19 +1309,17 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             letter :- (612.0, 792.0)
             A4 : 595.275590551 x 830.551181102
             """
-            enregistrer_fct()
-            
-            if type_de_certificat.get()==1:
-               nom_pdf="".join([nom[:len(nom)-20]+'_','Certificat_','Fatigue','.pdf'])
-            if type_de_certificat.get()==2:
-               nom_pdf="".join([nom[:len(nom)-20]+'_','Certificat_','Rupture','.pdf'])
-            if type_de_certificat.get()==3:
-               nom_pdf="".join([nom[:len(nom)-20]+'_','Certificat_','Epreuve','.pdf'])
-            if type_de_certificat.get()==4:
-               nom_pdf="".join([nom[:len(nom)-20]+'_','Certificat_','Préétirage','.pdf'])
-               
-            
-            c = pdfgen.canvas.Canvas(nom_pdf, pagesize=A4)
+            match type_de_certificat.get() :
+               case 1 :
+                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Fatigue.pdf"
+               case 2 :
+                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Rupture.pdf"
+               case 3 :
+                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_d_Épreuve.pdf"
+               case 4 :
+                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Préétirage.pdf"
+
+            c = cvpdf.Canvas(nom_pdf, pagesize=A4)
             ###rectangles de couleur
             ###titres en gris
             c.setFillColorRGB(0.9,0.9,0.9)
@@ -1380,86 +1421,83 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             ###logo Ino-Rope
             im = PIL.Image.open(DOSSIER_CONFIG_ET_CONSIGNES + 'Logo-Ino-Rope-blanc.png')
             c.drawInlineImage(im,455,775, width=90, height=14)
-      
-            nom_png="".join([nom[:len(nom)-5],'.png'])
-            # generate_image(nom_png)
+
+            nom_png = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + ".png"
+            generate_image(nom_png)
             im = PIL.Image.open(nom_png)   
             c.drawInlineImage(im,70,150, width=470, height=280)
             c.save()
             os.remove(nom_png)
             
-         # def generate_image(nom_image):
-         #    ###fonction de génération du fichier png comprenant la courbe excel du test.
-         #    nom_final=''.join([nom])
-         #    excel = Dispatch("Excel.Application")
-         #    excel.ActiveWorkbook
-         #    xlsWB = excel.Workbooks.Open(nom_final) 
-         #    xlsWB.Sheets("sheet1")
-         #    mychart = excel.Charts(1)
-         #    mychart.Export(Filename="".join([nom_image]))
+         def generate_image(nom_image):
+            ###fonction de génération du fichier png comprenant la courbe excel du test.
+            excel = Dispatch("Excel.Application")
+            excel.ActiveWorkbook
+            xlsWB = excel.Workbooks.Open(nom_du_fichier_xlsx) 
+            xlsWB.Sheets("sheet1")
+            mychart = excel.Charts(1)
+            mychart.Export(Filename = nom_image)
             
-            
-         fen_choix_certif=Toplevel(fenetre_principale)
+         fenetre_des_entrees_du_certificat=Toplevel(fenetre_principale)
 
-         Label(fen_choix_certif, text="Destinataire du certificat").grid(row=0,column=0,columnspan=5,padx =10, pady =10)
-         Label(fen_choix_certif, text="Société").grid(row=1,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Adresse").grid(row=2,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Rue").grid(row=2,column=1,padx =10, pady =10)
-         Label(fen_choix_certif, text="Ville").grid(row=3,column=1,padx =10, pady =10)
-         Label(fen_choix_certif, text="Code postal").grid(row=4,column=1,padx =10, pady =10)
-         Label(fen_choix_certif, text="Contact").grid(row=5,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Nom").grid(row=5,column=1,padx =10, pady =10)
-         Label(fen_choix_certif, text="téléphone").grid(row=6,column=1,padx =10, pady =10)
-         Label(fen_choix_certif, text="email").grid(row=7,column=1,padx =10, pady =10)
-         Label(fen_choix_certif, text="Commande").grid(row=8,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Destinataire du certificat").grid(row=0,column=0,columnspan=5,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Société").grid(row=1,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Adresse").grid(row=2,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Rue").grid(row=2,column=1,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Ville").grid(row=3,column=1,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Code postal").grid(row=4,column=1,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Contact").grid(row=5,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Nom").grid(row=5,column=1,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="téléphone").grid(row=6,column=1,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="email").grid(row=7,column=1,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Commande").grid(row=8,column=0,padx =10, pady =10)
          
-         Label(fen_choix_certif, text="Description de l'épreuve").grid(row=9,column=0,columnspan=5,padx =10, pady =10)
-         Label(fen_choix_certif, text="Banc de traction C10TL27").grid(row=10,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Opérateur").grid(row=11,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Projet").grid(row=12,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Matériel testé").grid(row=13,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Nature de l'expérience").grid(row=14,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Référence").grid(row=15,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Norme de charge_de_rupture validée").grid(row=16,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Date limite de validité").grid(row=17,column=0,padx =10, pady =10)
-         Label(fen_choix_certif, text="Commentaire").grid(row=18,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Description de l'épreuve").grid(row=9,column=0,columnspan=5,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Banc de traction C10TL27").grid(row=10,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Opérateur").grid(row=11,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Projet").grid(row=12,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Matériel testé").grid(row=13,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Nature de l'expérience").grid(row=14,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Référence").grid(row=15,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Norme de charge_de_rupture validée").grid(row=16,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Date limite de validité").grid(row=17,column=0,padx =10, pady =10)
+         Label(fenetre_des_entrees_du_certificat, text="Commentaire").grid(row=18,column=0,padx =10, pady =10)
          
-         Entry(fen_choix_certif, textvariable=societe, width=30).grid(row=1,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=adresse1, width=30).grid(row=2,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=adresse2, width=30).grid(row=3,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=adresse3, width=30).grid(row=4,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=contact1, width=30).grid(row=5,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=contact2, width=30).grid(row=6,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=contact3, width=30).grid(row=7,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=commande, width=30) .grid(row=8,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=societe, width=30).grid(row=1,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=adresse1, width=30).grid(row=2,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=adresse2, width=30).grid(row=3,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=adresse3, width=30).grid(row=4,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=contact1, width=30).grid(row=5,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=contact2, width=30).grid(row=6,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=contact3, width=30).grid(row=7,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=commande, width=30) .grid(row=8,column=2,padx =10, pady =10)
          
-         Entry(fen_choix_certif, textvariable=banc, width=30).grid(row=10,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=nom_prenom, width=30).grid(row=11,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=projet, width=30).grid(row=12,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=materiau, width=30).grid(row=13,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=epreuve, width=30).grid(row=14,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=reference, width=30).grid(row=15,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=normes, width=30).grid(row=16,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=validite, width=30).grid(row=17,column=2,padx =10, pady =10)
-         Entry(fen_choix_certif, textvariable=commentaires_de_l_utilisateur, width=30).grid(row=18,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=banc, width=30).grid(row=10,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=nom_prenom, width=30).grid(row=11,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=projet, width=30).grid(row=12,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=materiau, width=30).grid(row=13,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=epreuve, width=30).grid(row=14,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=reference, width=30).grid(row=15,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=normes, width=30).grid(row=16,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=validite, width=30).grid(row=17,column=2,padx =10, pady =10)
+         Entry(fenetre_des_entrees_du_certificat, textvariable=commentaires_de_l_utilisateur, width=30).grid(row=18,column=2,padx =10, pady =10)
          
-         Button(fen_choix_certif, text='Retour',command=retour_certif).grid(row=19,column=0,padx =10, pady =10)
-         Button(fen_choix_certif, text='Suivant',command=suivant_fct).grid(row=19,column=2,padx =10, pady =10)
-         
-         
+         Button(fenetre_des_entrees_du_certificat, text='Retour',command = fenetre_des_entrees_du_certificat.destroy).grid(row=19,column=0,padx =10, pady =10)
+         Button(fenetre_des_entrees_du_certificat, text='Suivant',command = creation_du_certificat_rempli).grid(row=19,column=2,padx =10, pady =10)
+
       ########################
    
-      fen_choix_certif=Toplevel(fenetre_principale)
-      fen_choix_certif.title('Choix de certificat')
+      fenetre_de_choix_du_type_de_certificat=Toplevel(fenetre_principale)
+      fenetre_de_choix_du_type_de_certificat.title('Choix de certificat')
       
-      Label(fen_choix_certif, text="Veuillez choisir le certificat que vous voulez créer", justify = CENTER).grid(row=1,column=1,columnspan=3,padx =10, pady =10)
-      Radiobutton(fen_choix_certif, text='Fatigue', variable=type_de_certificat, value=1).grid(row=2,column=1,columnspan=3,padx =10, pady =10)
-      Radiobutton(fen_choix_certif, text='Rupture', variable=type_de_certificat, value=2).grid(row=3,column=1,columnspan=3,padx =10, pady =10)
-      Radiobutton(fen_choix_certif, text='150% Charge de travail', variable=type_de_certificat, value=3).grid(row=4,column=1,columnspan=3,padx =10, pady =10)
-      Radiobutton(fen_choix_certif, text='Pré-étirage', variable=type_de_certificat, value=4).grid(row=5,column=1,columnspan=3,padx =10, pady =10)
+      Label(fenetre_de_choix_du_type_de_certificat, text="Veuillez choisir le type de certificat que vous voulez créer :", justify = CENTER).grid(row=1,column=1,columnspan=3,padx =10, pady =10)
+      Radiobutton(fenetre_de_choix_du_type_de_certificat, text='Fatigue', variable=type_de_certificat, value=1).grid(row=2,column=1,columnspan=3,padx =10, pady =10)
+      Radiobutton(fenetre_de_choix_du_type_de_certificat, text='Rupture', variable=type_de_certificat, value=2).grid(row=3,column=1,columnspan=3,padx =10, pady =10)
+      Radiobutton(fenetre_de_choix_du_type_de_certificat, text='150% Charge de travail', variable=type_de_certificat, value=3).grid(row=4,column=1,columnspan=3,padx =10, pady =10)
+      Radiobutton(fenetre_de_choix_du_type_de_certificat, text='Pré-étirage', variable=type_de_certificat, value=4).grid(row=5,column=1,columnspan=3,padx =10, pady =10)
 
-      Button(fen_choix_certif, text='Retour',command=fen_choix_certif.destroy).grid(row=6,column=1,padx =10, pady =10)
-      Button(fen_choix_certif, text='Suivant',command=entree_certif).grid(row=6,column=3,padx =10, pady =10)
+      Button(fenetre_de_choix_du_type_de_certificat, text='Retour',command=fenetre_de_choix_du_type_de_certificat.destroy).grid(row=6,column=1,padx =10, pady =10)
+      Button(fenetre_de_choix_du_type_de_certificat, text='Suivant',command=entrees_du_certificat).grid(row=6,column=3,padx =10, pady =10)
 
  #TODO : Gérer les différents PID et leur réglage. 
  #       Voir sensi_page() et reglage_des_coef_des_PID() dans les fonctions jetées.
@@ -1592,6 +1630,17 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          consigne_a_modifier = ajout_ou_modification_d_une_consigne(dict(consignes_du_generateur[indice_de_cette_consigne]))
          if consigne_a_modifier is not None :
             consignes_du_generateur[indice_de_cette_consigne] = consigne_a_modifier
+            if verrou_production == ON :
+               # 0 : mise en tension
+               # 1 : palier à charge = 0
+               # 2 : rampe jusqu'à la valeur demandée
+               # 3 : palier à cette valeur
+               # 4 : rampe  de retour à la position 0
+               # 5 : rampe jusqu'à la valeur demandée
+               # 6 : palier à cette valeur
+               consignes_du_generateur[3]["value"] = consignes_du_generateur[2]["speed"]
+               consignes_du_generateur[5] = consignes_du_generateur[2].copy()
+               consignes_du_generateur[6]["value"] = consignes_du_generateur[2]["speed"]
             return actualisation_des_boutons()
       #V
       def ajout_ou_modification_d_une_consigne(consigne_a_changer):
@@ -1606,73 +1655,142 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             nonlocal validation, consigne_a_changer, fenetre_de_modification_d_une_consigne
             validation = True
 
-            match consigne_a_changer['type'] :
-               case "constant" :
-                  consigne_a_changer["value"] = tons_to_volts(value.get())
-                  if type_de_condition.get() == 0 :
-                     consigne_a_changer["condition"] = None
-                  else :
-                     consigne_a_changer["condition"] = "delay=" + str(condition_en_temps.get())
-               case "ramp" :
-                  consigne_a_changer["speed"] = tons_to_volts(speed.get())
-                  match type_de_condition.get() :
-                     case 0 :
+            if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
+               match consigne_a_changer['type'] :
+                  case "constant" :
+                     consigne_a_changer["value"] = tons_to_volts(value.get())
+                     if type_de_condition.get() == 0 :
                         consigne_a_changer["condition"] = None
-                     case 1 :
-                        consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge.get()/2)
-                     case 2 :
-                        consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge.get()/2)
-                     case 3 :
+                     else :
                         consigne_a_changer["condition"] = "delay=" + str(condition_en_temps.get())
-               case "cyclic" :
-                  consigne_a_changer["value1"] = tons_to_volts(value1.get())
-                  consigne_a_changer["condition1"] = "delay=" + str(condition1.get())
+                  case "ramp" :
+                     consigne_a_changer["speed"] = tons_to_volts(speed.get())
+                     match type_de_condition.get() :
+                        case 0 :
+                           consigne_a_changer["condition"] = None
+                        case 1 :
+                           consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a.get()/2)
+                        case 2 :
+                           consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a.get()/2)
+                        case 3 :
+                           consigne_a_changer["condition"] = "delay=" + str(condition_en_temps.get())
+                  case "cyclic" :
+                     consigne_a_changer["value1"] = tons_to_volts(value1.get())
+                     consigne_a_changer["condition1"] = "delay=" + str(condition1.get())
 
-                  consigne_a_changer["value2"] = tons_to_volts(value2.get())
-                  consigne_a_changer["condition2"] = "delay=" + str(condition2.get())
+                     consigne_a_changer["value2"] = tons_to_volts(value2.get())
+                     consigne_a_changer["condition2"] = "delay=" + str(condition2.get())
 
-                  consigne_a_changer["cycles"] = nombre_de_cycles.get()
-               case "cyclic_ramp" :
-                  consigne_a_changer["speed1"] = tons_to_volts(speed1.get())
-                  match type_de_condition1.get() :
-                     case 0 :
-                        consigne_a_changer["condition1"] = None
-                     case 1 :
-                        consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge1.get()/2)
-                     case 2 :
-                        consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge1.get()/2)
-                     case 3 :
-                        consigne_a_changer["condition1"] = "delay=" + str(condition_en_temps1.get())
-                  
-                  consigne_a_changer["speed2"] = tons_to_volts(speed2.get())
-                  match type_de_condition2.get() :
-                     case 0 :
-                        consigne_a_changer["condition2"] = None
-                     case 1 :
-                        consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a_charge2.get()/2)
-                     case 2 :
-                        consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a_charge2.get()/2)
-                     case 3 :
-                        consigne_a_changer["condition2"] = "delay=" + str(condition_en_temps2.get())
-                  
-                  consigne_a_changer["cycles"] = nombre_de_cycles.get()
-               case "sine" :
-                  if pic_bas.get() > pic_haut.get() :
-                     showwarning("Attention", "Le pic haut doit être supérieur au pic bas")
-                     validation = False
-                     return
-                  if periode.get() == 0 :
-                     consigne_a_changer["freq"] = 0
-                  else :
-                     consigne_a_changer["freq"] = 1/periode.get()
-                  consigne_a_changer["amplitude"] = tons_to_volts(pic_haut.get() - pic_bas.get())
-                  consigne_a_changer["offset"] = tons_to_volts((pic_haut.get() + pic_bas.get()) / 2)
-                  consigne_a_changer["phase"] = phase.get() * pi / 2
-                  match type_de_condition.get() :
-                     case 0 :
+                     consigne_a_changer["cycles"] = nombre_de_cycles.get()
+                  case "cyclic_ramp" :
+                     consigne_a_changer["speed1"] = tons_to_volts(speed1.get())
+                     match type_de_condition1.get() :
+                        case 0 :
+                           consigne_a_changer["condition1"] = None
+                        case 1 :
+                           consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a1.get()/2)
+                        case 2 :
+                           consigne_a_changer["condition1"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a1.get()/2)
+                        case 3 :
+                           consigne_a_changer["condition1"] = "delay=" + str(condition_en_temps1.get())
+                     
+                     consigne_a_changer["speed2"] = tons_to_volts(speed2.get())
+                     match type_de_condition2.get() :
+                        case 0 :
+                           consigne_a_changer["condition2"] = None
+                        case 1 :
+                           consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a2.get()/2)
+                        case 2 :
+                           consigne_a_changer["condition2"] = LABEL_SORTIE_EN_CHARGE + "<" + str(condition_inferieure_a2.get()/2)
+                        case 3 :
+                           consigne_a_changer["condition2"] = "delay=" + str(condition_en_temps2.get())
+                     
+                     consigne_a_changer["cycles"] = nombre_de_cycles.get()
+                  case "sine" :
+                     if pic_bas.get() > pic_haut.get() :
+                        showwarning("Attention", "Le pic haut doit être supérieur au pic bas")
+                        validation = False
+                        return
+                     if periode.get() == 0 :
+                        consigne_a_changer["freq"] = 0
+                     else :
+                        consigne_a_changer["freq"] = 1/periode.get()
+                     consigne_a_changer["amplitude"] = tons_to_volts(pic_haut.get() - pic_bas.get())
+                     consigne_a_changer["offset"] = tons_to_volts((pic_haut.get() + pic_bas.get()) / 2)
+                     consigne_a_changer["phase"] = phase.get() * pi / 2
+                     match type_de_condition.get() :
+                        case 0 :
+                           consigne_a_changer["condition"] = None
+                        case 3 :
+                           consigne_a_changer["condition"] = "delay=" + str(condition_en_cycles.get() * periode.get())
+            else :
+               match consigne_a_changer['type'] :
+                  case "constant" :
+                     consigne_a_changer["value"] = COEF_MILLIMETERS_TO_VOLTS * value.get()
+                     if type_de_condition.get() == 0 :
                         consigne_a_changer["condition"] = None
-                     case 3 :
-                        consigne_a_changer["condition"] = "delay=" + str(condition_en_cycles.get() * periode.get())
+                     else :
+                        consigne_a_changer["condition"] = "delay=" + str(condition_en_temps.get())
+                  case "ramp" :
+                     consigne_a_changer["speed"] = COEF_MILLIMETERS_TO_VOLTS * speed.get()
+                     match type_de_condition.get() :
+                        case 0 :
+                           consigne_a_changer["condition"] = None
+                        case 1 :
+                           consigne_a_changer["condition"] = LABEL_SORTIE_EN_POSITION + ">" + str(COEF_MILLIMETERS_TO_VOLTS * condition_superieure_a.get())
+                        case 2 :
+                           consigne_a_changer["condition"] = LABEL_SORTIE_EN_POSITION + "<" + str(COEF_MILLIMETERS_TO_VOLTS * condition_inferieure_a.get())
+                        case 3 :
+                           consigne_a_changer["condition"] = "delay=" + str(condition_en_temps.get())
+                  case "cyclic" :
+                     consigne_a_changer["value1"] = COEF_MILLIMETERS_TO_VOLTS * value1.get()
+                     consigne_a_changer["condition1"] = "delay=" + str(condition1.get())
+
+                     consigne_a_changer["value2"] = COEF_MILLIMETERS_TO_VOLTS * value2.get()
+                     consigne_a_changer["condition2"] = "delay=" + str(condition2.get())
+
+                     consigne_a_changer["cycles"] = nombre_de_cycles.get()
+                  case "cyclic_ramp" :
+                     consigne_a_changer["speed1"] = COEF_MILLIMETERS_TO_VOLTS * speed1.get()
+                     match type_de_condition1.get() :
+                        case 0 :
+                           consigne_a_changer["condition1"] = None
+                        case 1 :
+                           consigne_a_changer["condition1"] = LABEL_SORTIE_EN_POSITION + ">" + str(COEF_MILLIMETERS_TO_VOLTS * condition_superieure_a1.get())
+                        case 2 :
+                           consigne_a_changer["condition1"] = LABEL_SORTIE_EN_POSITION + "<" + str(COEF_MILLIMETERS_TO_VOLTS * condition_inferieure_a1.get())
+                        case 3 :
+                           consigne_a_changer["condition1"] = "delay=" + str(condition_en_temps1.get())
+                     
+                     consigne_a_changer["speed2"] = COEF_MILLIMETERS_TO_VOLTS * speed2.get()
+                     match type_de_condition2.get() :
+                        case 0 :
+                           consigne_a_changer["condition2"] = None
+                        case 1 :
+                           consigne_a_changer["condition2"] = LABEL_SORTIE_EN_POSITION + ">" + str(COEF_MILLIMETERS_TO_VOLTS * condition_superieure_a2.get())
+                        case 2 :
+                           consigne_a_changer["condition2"] = LABEL_SORTIE_EN_POSITION + "<" + str(COEF_MILLIMETERS_TO_VOLTS * condition_inferieure_a2.get())
+                        case 3 :
+                           consigne_a_changer["condition2"] = "delay=" + str(condition_en_temps2.get())
+                     
+                     consigne_a_changer["cycles"] = nombre_de_cycles.get()
+                  case "sine" :
+                     if pic_bas.get() > pic_haut.get() :
+                        showwarning("Attention", "Le pic haut doit être supérieur au pic bas")
+                        validation = False
+                        return
+                     if periode.get() == 0 :
+                        consigne_a_changer["freq"] = 0
+                     else :
+                        consigne_a_changer["freq"] = 1/periode.get()
+                     consigne_a_changer["amplitude"] = COEF_MILLIMETERS_TO_VOLTS * (pic_haut.get() - pic_bas.get())
+                     consigne_a_changer["offset"] = COEF_MILLIMETERS_TO_VOLTS * ((pic_haut.get() + pic_bas.get()) / 2)
+                     consigne_a_changer["phase"] = phase.get() * pi / 2
+                     match type_de_condition.get() :
+                        case 0 :
+                           consigne_a_changer["condition"] = None
+                        case 3 :
+                           consigne_a_changer["condition"] = "delay=" + str(condition_en_cycles.get() * periode.get())
             fenetre_de_modification_d_une_consigne.destroy()
          #V
          validation = False
@@ -1682,220 +1800,431 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             fenetre_de_modification_d_une_consigne.title("Modification d'une consigne")
          else :
             fenetre_de_modification_d_une_consigne.title("Ajout d'une consigne")
-         Label(fenetre_de_modification_d_une_consigne, text = "Type :").grid(row = 0, column = 0, padx = 5, pady = 5)
-         Label(fenetre_de_modification_d_une_consigne, text = f" {TYPES_DE_CONSIGNE[consigne_a_changer['type']]}").grid(row = 0, column = 1, columnspan = 3, padx = 5, pady = 5)
+         if verrou_production == OFF :
+            Label(fenetre_de_modification_d_une_consigne, text = "Type :").grid(row = 0, column = 0, padx = 5, pady = 5)
+            Label(fenetre_de_modification_d_une_consigne, text = f" {TYPES_DE_CONSIGNE[consigne_a_changer['type']]}").grid(row = 0, column = 1, columnspan = 3, padx = 5, pady = 5)
+         if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
+            match consigne_a_changer["type"] :
+               case "constant" :
+                  value = DoubleVar()
+                  if est_une_modif :
+                     value.set(volts_to_tons(consigne_a_changer['value']))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur en tonnes :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  condition_en_temps = DoubleVar()
+                  type_de_condition = IntVar()
+                  if est_une_modif :
+                     cond = consigne_a_changer["condition"]
+                     if cond is None :
+                        type_de_condition.set(0)
+                     else :
+                        type_de_condition.set(3)
+                        condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
 
-         match consigne_a_changer["type"] :
-            case "constant" :
-               value = DoubleVar()
-               if est_une_modif :
-                  value.set(volts_to_tons(consigne_a_changer['value']))
-               Label(fenetre_de_modification_d_une_consigne, text = "Valeur en tonnes :").grid(row = 1, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
-               condition_en_temps = DoubleVar()
-               type_de_condition = IntVar()
-               if est_une_modif :
-                  cond = consigne_a_changer["condition"]
-                  if cond is None :
-                     type_de_condition.set(0)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 5, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 5, column = 3, padx = 5, pady = 5, sticky = 'w')
+               case "ramp" :
+                  speed = DoubleVar()
+                  if est_une_modif :
+                     speed.set(volts_to_tons(consigne_a_changer['speed']))
+                  if verrou_production == OFF :
+                     Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en tonnes/secondes :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                     Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  condition_superieure_a = DoubleVar()
+                  condition_inferieure_a = DoubleVar()
+                  condition_en_temps = DoubleVar()
+                  type_de_condition = IntVar()
+                  if est_une_modif :
+                     cond = consigne_a_changer["condition"]
+                     if cond is None :
+                        type_de_condition.set(0)
+                     elif '>' in cond :
+                        type_de_condition.set(1)
+                        condition_superieure_a.set(2 * float(cond[DEBUT_CONDITION_CHARGE:]))
+                     elif '<' in cond :
+                        type_de_condition.set(2)
+                        condition_inferieure_a.set(2 * float(cond[DEBUT_CONDITION_CHARGE:]))
+                     else :
+                        type_de_condition.set(3)
+                        condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
+                  if verrou_production == OFF :
+                     Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                     Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+                     
+                     Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition, value = 1).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
+                     Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
+                     Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 3, column = 3, padx = 5, pady = 5, sticky = 'w')
+                     
+                     Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition, value = 2).grid(row = 4, column = 1, padx = 5, pady = 5, sticky = 'w')
+                     Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 4, column = 2, padx = 5, pady = 5)
+                     Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 4, column = 3, padx = 5, pady = 5, sticky = 'w')
+                     
+                     Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 5, column = 1, padx = 5, pady = 5, sticky = 'w')
+                     Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
+                     Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 5, column = 3, padx = 5, pady = 5, sticky = 'w')
                   else :
-                     type_de_condition.set(3)
-                     condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
-               Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
-
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 5, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 5, column = 3, padx = 5, pady = 5, sticky = 'w')
-            case "ramp" :
-               speed = DoubleVar()
-               if est_une_modif :
-                  speed.set(volts_to_tons(consigne_a_changer['speed']))
-               Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en tonnes/secondes :").grid(row = 1, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
-               condition_superieure_a_charge = DoubleVar()
-               condition_inferieure_a_charge = DoubleVar()
-               condition_en_temps = DoubleVar()
-               type_de_condition = IntVar()
-               if est_une_modif :
-                  cond = consigne_a_changer["condition"]
-                  if cond is None :
-                     type_de_condition.set(0)
-                  elif '>' in cond :
-                     type_de_condition.set(1)
-                     condition_superieure_a_charge.set(2 * float(cond[DEBUT_CONDITION_CHARGE:]))
-                  elif '<' in cond :
-                     type_de_condition.set(2)
-                     condition_inferieure_a_charge.set(2 * float(cond[DEBUT_CONDITION_CHARGE:]))
+                     Label(fenetre_de_modification_d_une_consigne, text = "Tirer jusqu'à ").grid(row = 0, column = 0, padx = 5, pady = 5)
+                     Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge_prod), '%P')).grid(row = 0, column = 1, padx = 5, pady = 5)
+                     Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 0, column = 2, padx = 5, pady = 5, sticky = 'w')
+               case "cyclic" :
+                  value1 = DoubleVar()
+                  value2 = DoubleVar()
+                  if est_une_modif :
+                     value1.set(volts_to_tons(consigne_a_changer['value1']))
+                     value2.set(volts_to_tons(consigne_a_changer['value2']))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur en tonnes du premier palier :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur en tonnes du deuxième palier :").grid(row = 3, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 1, padx = 5, pady = 5)
+                  condition1 = DoubleVar()
+                  condition2 = DoubleVar()
+                  nombre_de_cycles = IntVar()
+                  if est_une_modif :
+                     condition1.set(float(consigne_a_changer["condition1"][DEBUT_CONDITION_TEMPS:]))
+                     condition2.set(float(consigne_a_changer["condition2"][DEBUT_CONDITION_TEMPS:]))
+                     nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
                   else :
-                     type_de_condition.set(3)
-                     condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
-               
-               Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition, value = 1).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a_charge, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 3, column = 3, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition, value = 2).grid(row = 4, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a_charge, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 4, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 4, column = 3, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 5, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 5, column = 3, padx = 5, pady = 5, sticky = 'w')
-            case "cyclic" :
-               value1 = DoubleVar()
-               value2 = DoubleVar()
-               if est_une_modif :
-                  value1.set(volts_to_tons(consigne_a_changer['value1']))
-                  value2.set(volts_to_tons(consigne_a_changer['value2']))
-               Label(fenetre_de_modification_d_une_consigne, text = "Valeur en tonnes du premier palier :").grid(row = 1, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "Valeur en tonnes du deuxième palier :").grid(row = 3, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 1, padx = 5, pady = 5)
-               condition1 = DoubleVar()
-               condition2 = DoubleVar()
-               nombre_de_cycles = IntVar()
-               if est_une_modif :
-                  condition1.set(float(consigne_a_changer["condition1"][DEBUT_CONDITION_TEMPS:]))
-                  condition2.set(float(consigne_a_changer["condition2"][DEBUT_CONDITION_TEMPS:]))
-                  nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
-               else :
-                  nombre_de_cycles.set(1)
+                     nombre_de_cycles.set(1)
 
-               Label(fenetre_de_modification_d_une_consigne, text = "Durée du premier palier :").grid(row = 2, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 2, column = 1, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 2, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Durée du premier palier :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 2, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 2, column = 2, padx = 5, pady = 5, sticky = 'w')
 
-               Label(fenetre_de_modification_d_une_consigne, text = "Durée du deuxième palier :").grid(row = 4, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 4, column = 1, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 4, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Durée du deuxième palier :").grid(row = 4, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 4, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 4, column = 2, padx = 5, pady = 5, sticky = 'w')
 
-               Label(fenetre_de_modification_d_une_consigne, text = "Nombre de cycles :").grid(row = 5, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = nombre_de_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_cycles), '%P')).grid(row = 5, column = 1, padx = 5, pady = 5)
-            case "cyclic_ramp" :
-               speed1 = DoubleVar()
-               speed2 = DoubleVar()
-               if est_une_modif :
-                  speed1.set(volts_to_tons(consigne_a_changer['speed1']))
-                  speed2.set(volts_to_tons(consigne_a_changer['speed2']))
-               Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en tonnes/secondes :").grid(row = 1, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en tonnes/secondes :").grid(row = 5, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_charge), '%P')).grid(row = 5, column = 1, padx = 5, pady = 5)
-               condition_superieure_a_charge1 = DoubleVar()
-               condition_inferieure_a_charge1 = DoubleVar()
-               condition_en_temps1 = DoubleVar()
-               type_de_condition1 = IntVar()
-               condition_superieure_a_charge2 = DoubleVar()
-               condition_inferieure_a_charge2 = DoubleVar()
-               condition_en_temps2 = DoubleVar()
-               type_de_condition2 = IntVar()
-               nombre_de_cycles = IntVar()
-               if est_une_modif :
-                  cond1 = consigne_a_changer["condition1"]
-                  cond2 = consigne_a_changer["condition2"]
-                  nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
-                  if '>' in cond1 :
-                     type_de_condition1.set(1)
-                     condition_superieure_a_charge1.set(2 * float(cond1[DEBUT_CONDITION_CHARGE:]))
-                  elif '<' in cond1 :
-                     type_de_condition1.set(2)
-                     condition_inferieure_a_charge1.set(2 * float(cond1[DEBUT_CONDITION_CHARGE:]))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Nombre de cycles :").grid(row = 5, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = nombre_de_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_cycles), '%P')).grid(row = 5, column = 1, padx = 5, pady = 5)
+               case "cyclic_ramp" :
+                  speed1 = DoubleVar()
+                  speed2 = DoubleVar()
+                  if est_une_modif :
+                     speed1.set(volts_to_tons(consigne_a_changer['speed1']))
+                     speed2.set(volts_to_tons(consigne_a_changer['speed2']))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en tonnes/secondes :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_charge), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en tonnes/secondes :").grid(row = 5, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_charge), '%P')).grid(row = 5, column = 1, padx = 5, pady = 5)
+                  condition_superieure_a1 = DoubleVar()
+                  condition_inferieure_a1 = DoubleVar()
+                  condition_en_temps1 = DoubleVar()
+                  type_de_condition1 = IntVar()
+                  condition_superieure_a2 = DoubleVar()
+                  condition_inferieure_a2 = DoubleVar()
+                  condition_en_temps2 = DoubleVar()
+                  type_de_condition2 = IntVar()
+                  nombre_de_cycles = IntVar()
+                  if est_une_modif :
+                     cond1 = consigne_a_changer["condition1"]
+                     cond2 = consigne_a_changer["condition2"]
+                     nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
+                     if '>' in cond1 :
+                        type_de_condition1.set(1)
+                        condition_superieure_a1.set(2 * float(cond1[DEBUT_CONDITION_CHARGE:]))
+                     elif '<' in cond1 :
+                        type_de_condition1.set(2)
+                        condition_inferieure_a1.set(2 * float(cond1[DEBUT_CONDITION_CHARGE:]))
+                     else :
+                        type_de_condition1.set(3)
+                        condition_en_temps1.set(float(cond1[DEBUT_CONDITION_TEMPS:]))
+                     
+                     if '>' in cond2 :
+                        type_de_condition2.set(1)
+                        condition_superieure_a2.set(2 * float(cond2[DEBUT_CONDITION_CHARGE:]))
+                     elif '<' in cond2 :
+                        type_de_condition2.set(2)
+                        condition_inferieure_a2.set(2 * float(cond2[DEBUT_CONDITION_CHARGE:]))
+                     else :
+                        type_de_condition2.set(3)
+                        condition_en_temps2.set(float(cond2[DEBUT_CONDITION_TEMPS:]))
                   else :
                      type_de_condition1.set(3)
-                     condition_en_temps1.set(float(cond1[DEBUT_CONDITION_TEMPS:]))
-                  
-                  if '>' in cond2 :
-                     type_de_condition2.set(1)
-                     condition_superieure_a_charge2.set(2 * float(cond2[DEBUT_CONDITION_CHARGE:]))
-                  elif '<' in cond2 :
-                     type_de_condition2.set(2)
-                     condition_inferieure_a_charge2.set(2 * float(cond2[DEBUT_CONDITION_CHARGE:]))
-                  else :
                      type_de_condition2.set(3)
-                     condition_en_temps2.set(float(cond2[DEBUT_CONDITION_TEMPS:]))
-               else :
-                  type_de_condition1.set(3)
-                  type_de_condition2.set(3)
-                  nombre_de_cycles.set(1)
-               
-               Label(fenetre_de_modification_d_une_consigne, text = "Condition de passage à la deuxième :").grid(row = 2, column = 0, padx = 5, pady = 5)
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition1, value = 1).grid(row = 2, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a_charge1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 2, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 2, column = 3, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition1, value = 2).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a_charge1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 3, column = 3, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition1, value = 3).grid(row = 4, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 4, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 4, column = 3, padx = 5, pady = 5, sticky = 'w')
+                     nombre_de_cycles.set(1)
+                  
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition de passage à la deuxième :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition1, value = 1).grid(row = 2, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 2, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 2, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition1, value = 2).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 3, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition1, value = 3).grid(row = 4, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 4, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 4, column = 3, padx = 5, pady = 5, sticky = 'w')
 
-               Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 6, column = 0, padx = 5, pady = 5)
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition2, value = 1).grid(row = 6, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a_charge2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 6, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 6, column = 3, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition2, value = 2).grid(row = 7, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a_charge2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 7, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 7, column = 3, padx = 5, pady = 5, sticky = 'w')
-               
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition2, value = 3).grid(row = 8, column = 1, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 8, column = 2, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 8, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 6, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition2, value = 1).grid(row = 6, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 6, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 6, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition2, value = 2).grid(row = 7, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 7, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "T").grid(row = 7, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition2, value = 3).grid(row = 8, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 8, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 8, column = 3, padx = 5, pady = 5, sticky = 'w')
 
-               Label(fenetre_de_modification_d_une_consigne, text = "Nombre de cycles :").grid(row = 10, column = 0, padx = 5, pady = 5)
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = nombre_de_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_cycles), '%P')).grid(row = 10, column = 1, padx = 5, pady = 5)
-            case "sine" :
-               periode = DoubleVar()
-               pic_haut = DoubleVar()
-               pic_bas = DoubleVar()
-               phase = IntVar()
-               if est_une_modif :
-                  if consigne_a_changer['freq'] :
-                     periode.set(1/consigne_a_changer['freq'])
-                  pic_haut.set(volts_to_tons(consigne_a_changer['offset'] + consigne_a_changer['amplitude'] / 2))
-                  pic_bas.set(volts_to_tons(consigne_a_changer['offset'] - consigne_a_changer['amplitude'] / 2))
-                  phase.set(int(consigne_a_changer['phase'] * 2 / pi + 0.05)) # +0.05 en cas d'approximation
-               Label(fenetre_de_modification_d_une_consigne, text = "Période en secondes :").grid(row = 1, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = periode, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 1, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Label(fenetre_de_modification_d_une_consigne, text = "Valeur maxinimale en tonnes :").grid(row = 2, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = pic_haut, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 2, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Label(fenetre_de_modification_d_une_consigne, text = "Valeur minimale en tonnes :").grid(row = 3, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = pic_bas, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Label(fenetre_de_modification_d_une_consigne, text = "Départ du sinus :").grid(row = 4, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "Au centre, vers le haut", variable = phase, value = 0).grid(row = 4, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "En haut", variable = phase, value = 1).grid(row = 5, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "Au centre, vers le bas", variable = phase, value = 2).grid(row = 6, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "En bas", variable = phase, value = 3).grid(row = 7, column = 2, padx = 5, pady = 5, sticky = 'w')
-               condition_superieure_a_charge = DoubleVar()
-               condition_inferieure_a_charge = DoubleVar()
-               condition_en_cycles = DoubleVar()
-               type_de_condition = IntVar()
-               if est_une_modif :
-                  cond = consigne_a_changer["condition"]
-                  if cond is None :
-                     type_de_condition.set(0)
+                  Label(fenetre_de_modification_d_une_consigne, text = "Nombre de cycles :").grid(row = 10, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = nombre_de_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_cycles), '%P')).grid(row = 10, column = 1, padx = 5, pady = 5)
+               case "sine" :
+                  periode = DoubleVar()
+                  pic_haut = DoubleVar()
+                  pic_bas = DoubleVar()
+                  phase = IntVar()
+                  if est_une_modif :
+                     if consigne_a_changer['freq'] :
+                        periode.set(1/consigne_a_changer['freq'])
+                     pic_haut.set(volts_to_tons(consigne_a_changer['offset'] + consigne_a_changer['amplitude'] / 2))
+                     pic_bas.set(volts_to_tons(consigne_a_changer['offset'] - consigne_a_changer['amplitude'] / 2))
+                     phase.set(int(consigne_a_changer['phase'] * 2 / pi + 0.05)) # +0.05 en cas d'approximation
+                  Label(fenetre_de_modification_d_une_consigne, text = "Période en secondes :").grid(row = 1, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = periode, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 1, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur minimale en tonnes :").grid(row = 2, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = pic_bas, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 2, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur maximale en tonnes :").grid(row = 3, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = pic_haut, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Départ du sinus :").grid(row = 4, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "Au centre, vers le haut", variable = phase, value = 0).grid(row = 4, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "En haut", variable = phase, value = 1).grid(row = 5, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "Au centre, vers le bas", variable = phase, value = 2).grid(row = 6, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "En bas", variable = phase, value = 3).grid(row = 7, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  condition_superieure_a = DoubleVar()
+                  condition_inferieure_a = DoubleVar()
+                  condition_en_cycles = DoubleVar()
+                  type_de_condition = IntVar()
+                  if est_une_modif :
+                     cond = consigne_a_changer["condition"]
+                     if cond is None :
+                        type_de_condition.set(0)
+                     else :
+                        type_de_condition.set(3)
+                        condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
+                  
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 8, column = 0, columnspan = 2, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 8, column = 2, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 11, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 11, column = 3, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "cycle(s)").grid(row = 11, column = 4, padx = 5, pady = 5, sticky = 'w')
+         else :
+            match consigne_a_changer["type"] :
+               case "constant" :
+                  value = DoubleVar()
+                  if est_une_modif :
+                     value.set(COEF_VOLTS_TO_MILLIMETERS * consigne_a_changer['value'])
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur en millimètres :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  condition_en_temps = DoubleVar()
+                  type_de_condition = IntVar()
+                  if est_une_modif :
+                     cond = consigne_a_changer["condition"]
+                     if cond is None :
+                        type_de_condition.set(0)
+                     else :
+                        type_de_condition.set(3)
+                        condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 5, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 5, column = 3, padx = 5, pady = 5, sticky = 'w')
+               case "ramp" :
+                  speed = DoubleVar()
+                  if est_une_modif :
+                     speed.set(COEF_VOLTS_TO_MILLIMETERS * consigne_a_changer['speed'])
+                  if verrou_production == OFF :
+                     Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en millimètres/secondes :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                     Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_position), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  condition_superieure_a = DoubleVar()
+                  condition_inferieure_a = DoubleVar()
+                  condition_en_temps = DoubleVar()
+                  type_de_condition = IntVar()
+                  if est_une_modif :
+                     cond = consigne_a_changer["condition"]
+                     if cond is None :
+                        type_de_condition.set(0)
+                     elif '>' in cond :
+                        type_de_condition.set(1)
+                        condition_superieure_a.set(COEF_VOLTS_TO_MILLIMETERS * float(cond[DEBUT_CONDITION_POSITION:]))
+                     elif '<' in cond :
+                        type_de_condition.set(2)
+                        condition_inferieure_a.set(COEF_VOLTS_TO_MILLIMETERS * float(cond[DEBUT_CONDITION_POSITION:]))
+                     else :
+                        type_de_condition.set(3)
+                        condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition, value = 1).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "mm").grid(row = 3, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition, value = 2).grid(row = 4, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 4, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "mm").grid(row = 4, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 5, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 5, column = 3, padx = 5, pady = 5, sticky = 'w')
+               case "cyclic" :
+                  value1 = DoubleVar()
+                  value2 = DoubleVar()
+                  if est_une_modif :
+                     value1.set(COEF_VOLTS_TO_MILLIMETERS * consigne_a_changer['value1'])
+                     value2.set(COEF_VOLTS_TO_MILLIMETERS * consigne_a_changer['value2'])
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur en millimètres du premier palier :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur en millimètres du deuxième palier :").grid(row = 3, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = value2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 3, column = 1, padx = 5, pady = 5)
+                  condition1 = DoubleVar()
+                  condition2 = DoubleVar()
+                  nombre_de_cycles = IntVar()
+                  if est_une_modif :
+                     condition1.set(float(consigne_a_changer["condition1"][DEBUT_CONDITION_TEMPS:]))
+                     condition2.set(float(consigne_a_changer["condition2"][DEBUT_CONDITION_TEMPS:]))
+                     nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
                   else :
-                     type_de_condition.set(3)
-                     condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
-               
-               Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 8, column = 0, columnspan = 2, padx = 5, pady = 5)
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 8, column = 2, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
-               Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 11, column = 2, padx = 5, pady = 5, sticky = 'w')
-               Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 11, column = 3, padx = 5, pady = 5)
-               Label(fenetre_de_modification_d_une_consigne, text = "cycle(s)").grid(row = 11, column = 4, padx = 5, pady = 5, sticky = 'w')
-         
-         Button(fenetre_de_modification_d_une_consigne, text = "Annuler", command = fenetre_de_modification_d_une_consigne.destroy).grid(row = 100, column = 0, columnspan = 2, padx = 5, pady = 5)
-         Button(fenetre_de_modification_d_une_consigne, text = "Valider", command = ajout_ou_modification_validee).grid(row = 100, column = 2, columnspan = 3, padx = 5, pady = 5)
-         
-         fenetre_de_modification_d_une_consigne.wait_window()
-         if validation :
-            return consigne_a_changer
+                     nombre_de_cycles.set(1)
+
+                  Label(fenetre_de_modification_d_une_consigne, text = "Durée du premier palier :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 2, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 2, column = 2, padx = 5, pady = 5, sticky = 'w')
+
+                  Label(fenetre_de_modification_d_une_consigne, text = "Durée du deuxième palier :").grid(row = 4, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 4, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 4, column = 2, padx = 5, pady = 5, sticky = 'w')
+
+                  Label(fenetre_de_modification_d_une_consigne, text = "Nombre de cycles :").grid(row = 5, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = nombre_de_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_cycles), '%P')).grid(row = 5, column = 1, padx = 5, pady = 5)
+               case "cyclic_ramp" :
+                  speed1 = DoubleVar()
+                  speed2 = DoubleVar()
+                  if est_une_modif :
+                     speed1.set(COEF_VOLTS_TO_MILLIMETERS * consigne_a_changer['speed1'])
+                     speed2.set(COEF_VOLTS_TO_MILLIMETERS * consigne_a_changer['speed2'])
+                  Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en millimètres/secondes :").grid(row = 1, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_position), '%P')).grid(row = 1, column = 1, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "Vitesse en millimètres/secondes :").grid(row = 5, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = speed2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_vitesse_position), '%P')).grid(row = 5, column = 1, padx = 5, pady = 5)
+                  condition_superieure_a1 = DoubleVar()
+                  condition_inferieure_a1 = DoubleVar()
+                  condition_en_temps1 = DoubleVar()
+                  type_de_condition1 = IntVar()
+                  condition_superieure_a2 = DoubleVar()
+                  condition_inferieure_a2 = DoubleVar()
+                  condition_en_temps2 = DoubleVar()
+                  type_de_condition2 = IntVar()
+                  nombre_de_cycles = IntVar()
+                  if est_une_modif :
+                     cond1 = consigne_a_changer["condition1"]
+                     cond2 = consigne_a_changer["condition2"]
+                     nombre_de_cycles.set(int(consigne_a_changer["cycles"]))
+                     if '>' in cond1 :
+                        type_de_condition1.set(1)
+                        condition_superieure_a1.set(COEF_VOLTS_TO_MILLIMETERS * float(cond1[DEBUT_CONDITION_POSITION:]))
+                     elif '<' in cond1 :
+                        type_de_condition1.set(2)
+                        condition_inferieure_a1.set(COEF_VOLTS_TO_MILLIMETERS * float(cond1[DEBUT_CONDITION_POSITION:]))
+                     else :
+                        type_de_condition1.set(3)
+                        condition_en_temps1.set(float(cond1[DEBUT_CONDITION_TEMPS:]))
+                     
+                     if '>' in cond2 :
+                        type_de_condition2.set(1)
+                        condition_superieure_a2.set(COEF_VOLTS_TO_MILLIMETERS * float(cond2[DEBUT_CONDITION_POSITION:]))
+                     elif '<' in cond2 :
+                        type_de_condition2.set(2)
+                        condition_inferieure_a2.set(COEF_VOLTS_TO_MILLIMETERS * float(cond2[DEBUT_CONDITION_POSITION:]))
+                     else :
+                        type_de_condition2.set(3)
+                        condition_en_temps2.set(float(cond2[DEBUT_CONDITION_TEMPS:]))
+                  else :
+                     type_de_condition1.set(3)
+                     type_de_condition2.set(3)
+                     nombre_de_cycles.set(1)
+                  
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition de passage à la deuxième :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition1, value = 1).grid(row = 2, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 2, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "mm").grid(row = 2, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition1, value = 2).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "mm").grid(row = 3, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition1, value = 3).grid(row = 4, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps1, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 4, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 4, column = 3, padx = 5, pady = 5, sticky = 'w')
+
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 6, column = 0, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition2, value = 1).grid(row = 6, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 6, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "mm").grid(row = 6, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "      <", variable = type_de_condition2, value = 2).grid(row = 7, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_inferieure_a2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 7, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "mm").grid(row = 7, column = 3, padx = 5, pady = 5, sticky = 'w')
+                  
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition2, value = 3).grid(row = 8, column = 1, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_temps2, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 8, column = 2, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "s").grid(row = 8, column = 3, padx = 5, pady = 5, sticky = 'w')
+
+                  Label(fenetre_de_modification_d_une_consigne, text = "Nombre de cycles :").grid(row = 10, column = 0, padx = 5, pady = 5)
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = nombre_de_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_cycles), '%P')).grid(row = 10, column = 1, padx = 5, pady = 5)
+               case "sine" :
+                  periode = DoubleVar()
+                  pic_haut = DoubleVar()
+                  pic_bas = DoubleVar()
+                  phase = IntVar()
+                  if est_une_modif :
+                     if consigne_a_changer['freq'] :
+                        periode.set(1/consigne_a_changer['freq'])
+                     pic_haut.set(COEF_VOLTS_TO_MILLIMETERS * (consigne_a_changer['offset'] + consigne_a_changer['amplitude'] / 2))
+                     pic_bas.set(COEF_VOLTS_TO_MILLIMETERS * (consigne_a_changer['offset'] - consigne_a_changer['amplitude'] / 2))
+                     phase.set(int(consigne_a_changer['phase'] * 2 / pi + 0.05)) # +0.05 en cas d'approximation
+                  Label(fenetre_de_modification_d_une_consigne, text = "Période en secondes :").grid(row = 1, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = periode, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 1, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur maximale en millimètres :").grid(row = 3, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = pic_bas, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 2, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Départ du sinus :").grid(row = 4, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = pic_haut, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Label(fenetre_de_modification_d_une_consigne, text = "Valeur minimale en millimètres :").grid(row = 2, column = 0, columnspan = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "Au centre, vers le haut", variable = phase, value = 0).grid(row = 4, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "En haut", variable = phase, value = 1).grid(row = 5, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "Au centre, vers le bas", variable = phase, value = 2).grid(row = 6, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "En bas", variable = phase, value = 3).grid(row = 7, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  condition_superieure_a = DoubleVar()
+                  condition_inferieure_a = DoubleVar()
+                  condition_en_cycles = DoubleVar()
+                  type_de_condition = IntVar()
+                  if est_une_modif :
+                     cond = consigne_a_changer["condition"]
+                     if cond is None :
+                        type_de_condition.set(0)
+                     else :
+                        type_de_condition.set(3)
+                        condition_en_cycles.set(float(cond[DEBUT_CONDITION_TEMPS:]))
+                  
+                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 8, column = 0, columnspan = 2, padx = 5, pady = 5)
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 8, column = 2, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "pendant", variable = type_de_condition, value = 3).grid(row = 11, column = 2, padx = 5, pady = 5, sticky = 'w')
+                  Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 11, column = 3, padx = 5, pady = 5)
+                  Label(fenetre_de_modification_d_une_consigne, text = "cycle(s)").grid(row = 11, column = 4, padx = 5, pady = 5, sticky = 'w')
+
+            Button(fenetre_de_modification_d_une_consigne, text = "Annuler", command = fenetre_de_modification_d_une_consigne.destroy).grid(row = 100, column = 0, columnspan = 2, padx = 5, pady = 5)
+            Button(fenetre_de_modification_d_une_consigne, text = "Valider", command = ajout_ou_modification_validee).grid(row = 100, column = 2, columnspan = 3, padx = 5, pady = 5)
+            
+            fenetre_de_modification_d_une_consigne.wait_window()
+            if validation :
+               return consigne_a_changer
       #V
       def suppression_de_toutes_les_consignes():
          """FR : Supprime toutes les consignes.
@@ -1954,7 +2283,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          nonlocal premieres_consignes_validees
          premieres_consignes_validees = True
          chemin_du_dernier_test = DOSSIER_CONFIG_ET_CONSIGNES
-         if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
+         if verrou_production == ON :
+            chemin_du_dernier_test += "consignes_du_test_precedent_production.json"
+         elif type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
             chemin_du_dernier_test += "consignes_du_test_precedent_charge.json"
          else :
             chemin_du_dernier_test += "consignes_du_test_precedent_deplacement.json"
@@ -1979,70 +2310,136 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                for consigne_du_generateur in consignes_du_generateur :
                   indice_de_cette_consigne += 1
                   label_de_cette_consigne = ""
-                  match consigne_du_generateur['type'] :
-                     case "ramp" :
-                        label_de_cette_consigne = f"Rampe simple de {2 * consigne_du_generateur['speed']}T/s"
-                        condition_d_arret = consigne_du_generateur["condition"]
-                        if condition_d_arret is None :
-                           label_de_cette_consigne += ", dure indéfiniment"
-                        elif condition_d_arret.startswith('delay') :
-                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                        else :
-                           label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
-                     case "constant" :
-                        label_de_cette_consigne = "Palier à "
-                        label_de_cette_consigne += f"{2 * consigne_du_generateur['value']}T"
-                        condition_d_arret = consigne_du_generateur["condition"]
-                        if condition_d_arret is None :
-                           label_de_cette_consigne += ", dure indéfiniment"
-                        elif condition_d_arret.startswith('delay') :
-                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                        else :
-                           label_de_cette_consigne += f" maintenu jusqu'à atteindre {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
-                     case "cyclic_ramp" :
-                        label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de rampes : "
-                        label_de_cette_consigne += f"{2 * consigne_du_generateur['speed1']}T/s"
-                        condition_d_arret = consigne_du_generateur["condition1"]
-                        if condition_d_arret.startswith('delay') :
-                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                        else :
-                           label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
-                        label_de_cette_consigne += f", {2 * consigne_du_generateur['speed2']}T/s"
-                        condition_d_arret = consigne_du_generateur["condition2"]
-                        if condition_d_arret.startswith('delay') :
-                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                        else :
-                           label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
-                     case "cyclic" :
-                        label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de paliers : "
-                        label_de_cette_consigne += f"{2 * consigne_du_generateur['value1']}T"
-                        condition_d_arret = consigne_du_generateur["condition1"]
-                        if condition_d_arret.startswith('delay') :
-                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                        else :
-                           label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
-                        label_de_cette_consigne += f", {2 * consigne_du_generateur['value2']}T"
-                        condition_d_arret = consigne_du_generateur["condition2"]
-                        if condition_d_arret.startswith('delay') :
-                           label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
-                        else :
-                           label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
-                     case "sine" :
-                        label_de_cette_consigne = f"Sinus allant de {2 * (consigne_du_generateur['offset'] - consigne_du_generateur['amplitude'] / 2)}T à {2 * (consigne_du_generateur['offset'] + consigne_du_generateur['amplitude'] / 2)}T, de période {1 / consigne_du_generateur['freq']}s, démarrant "
-                        match int(consigne_du_generateur['phase'] * 2 / pi + 0.05) :
-                           case 0 :
-                              label_de_cette_consigne += "croissant au centre"
-                           case 1 :
-                              label_de_cette_consigne += "à son maximum"
-                           case 2 :
-                              label_de_cette_consigne += "décroissant au centre"
-                           case 3 :
-                              label_de_cette_consigne += "à son minimum"
-                        condition_d_arret = consigne_du_generateur["condition"]
-                        if condition_d_arret is None :
-                           label_de_cette_consigne += ", dure indéfiniment"
-                        else :
-                           label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
+                  if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
+                     match consigne_du_generateur['type'] :
+                        case "ramp" :
+                           label_de_cette_consigne = f"Rampe simple de {2 * consigne_du_generateur['speed']}T/s"
+                           condition_d_arret = consigne_du_generateur["condition"]
+                           if condition_d_arret is None :
+                              label_de_cette_consigne += ", dure indéfiniment"
+                           elif condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
+                        case "constant" :
+                           label_de_cette_consigne = "Palier à "
+                           label_de_cette_consigne += f"{2 * consigne_du_generateur['value']}T"
+                           condition_d_arret = consigne_du_generateur["condition"]
+                           if condition_d_arret is None :
+                              label_de_cette_consigne += ", dure indéfiniment"
+                           elif condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" maintenu jusqu'à atteindre {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                        case "cyclic_ramp" :
+                           label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de rampes : "
+                           label_de_cette_consigne += f"{2 * consigne_du_generateur['speed1']}T/s"
+                           condition_d_arret = consigne_du_generateur["condition1"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
+                           label_de_cette_consigne += f", {2 * consigne_du_generateur['speed2']}T/s"
+                           condition_d_arret = consigne_du_generateur["condition2"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {str(2 * float(condition_d_arret[DEBUT_CONDITION_CHARGE:]))}T"
+                        case "cyclic" :
+                           label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de paliers : "
+                           label_de_cette_consigne += f"{2 * consigne_du_generateur['value1']}T"
+                           condition_d_arret = consigne_du_generateur["condition1"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                           label_de_cette_consigne += f", {2 * consigne_du_generateur['value2']}T"
+                           condition_d_arret = consigne_du_generateur["condition2"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {condition_d_arret[DEBUT_CONDITION_CHARGE:]}T"
+                        case "sine" :
+                           label_de_cette_consigne = f"Sinus allant de {2 * (consigne_du_generateur['offset'] - consigne_du_generateur['amplitude'] / 2)}T à {2 * (consigne_du_generateur['offset'] + consigne_du_generateur['amplitude'] / 2)}T, de période {1 / consigne_du_generateur['freq']}s, démarrant "
+                           match int(consigne_du_generateur['phase'] * 2 / pi + 0.05) :
+                              case 0 :
+                                 label_de_cette_consigne += "croissant au centre"
+                              case 1 :
+                                 label_de_cette_consigne += "à son maximum"
+                              case 2 :
+                                 label_de_cette_consigne += "décroissant au centre"
+                              case 3 :
+                                 label_de_cette_consigne += "à son minimum"
+                           condition_d_arret = consigne_du_generateur["condition"]
+                           if condition_d_arret is None :
+                              label_de_cette_consigne += ", dure indéfiniment"
+                           else :
+                              label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
+                  else :
+                     match consigne_du_generateur['type'] :
+                        case "ramp" :
+                           label_de_cette_consigne = f"Rampe simple de {COEF_VOLTS_TO_MILLIMETERS * consigne_du_generateur['speed']}mm/s"
+                           condition_d_arret = consigne_du_generateur["condition"]
+                           if condition_d_arret is None :
+                              label_de_cette_consigne += ", dure indéfiniment"
+                           elif condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {str(COEF_VOLTS_TO_MILLIMETERS * float(condition_d_arret[DEBUT_CONDITION_POSITION:]))}mm"
+                        case "constant" :
+                           label_de_cette_consigne = "Palier à "
+                           label_de_cette_consigne += f"{COEF_VOLTS_TO_MILLIMETERS * consigne_du_generateur['value']}mm"
+                           condition_d_arret = consigne_du_generateur["condition"]
+                           if condition_d_arret is None :
+                              label_de_cette_consigne += ", dure indéfiniment"
+                           elif condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" maintenu jusqu'à atteindre {COEF_VOLTS_TO_MILLIMETERS * condition_d_arret[DEBUT_CONDITION_POSITION:]}T"
+                        case "cyclic_ramp" :
+                           label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de rampes : "
+                           label_de_cette_consigne += f"{COEF_VOLTS_TO_MILLIMETERS * consigne_du_generateur['speed1']}mm/s"
+                           condition_d_arret = consigne_du_generateur["condition1"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {str(COEF_VOLTS_TO_MILLIMETERS * float(condition_d_arret[DEBUT_CONDITION_POSITION:]))}T"
+                           label_de_cette_consigne += f", {COEF_VOLTS_TO_MILLIMETERS * consigne_du_generateur['speed2']}mm/s"
+                           condition_d_arret = consigne_du_generateur["condition2"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {str(COEF_VOLTS_TO_MILLIMETERS * float(condition_d_arret[DEBUT_CONDITION_POSITION:]))}T"
+                        case "cyclic" :
+                           label_de_cette_consigne = f"{consigne_du_generateur['cycles']} cycles de paliers : "
+                           label_de_cette_consigne += f"{COEF_VOLTS_TO_MILLIMETERS * consigne_du_generateur['value1']}mm"
+                           condition_d_arret = consigne_du_generateur["condition1"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {COEF_VOLTS_TO_MILLIMETERS * condition_d_arret[DEBUT_CONDITION_POSITION:]}mm"
+                           label_de_cette_consigne += f", {COEF_VOLTS_TO_MILLIMETERS * consigne_du_generateur['value2']}mm"
+                           condition_d_arret = consigne_du_generateur["condition2"]
+                           if condition_d_arret.startswith('delay') :
+                              label_de_cette_consigne += f" pendant {condition_d_arret[DEBUT_CONDITION_TEMPS:]}s"
+                           else :
+                              label_de_cette_consigne += f" jusqu'à {COEF_VOLTS_TO_MILLIMETERS * condition_d_arret[DEBUT_CONDITION_POSITION:]}mm"
+                        case "sine" :
+                           label_de_cette_consigne = f"Sinus allant de {COEF_VOLTS_TO_MILLIMETERS * (consigne_du_generateur['offset'] - consigne_du_generateur['amplitude'] / 2)}mm à {COEF_VOLTS_TO_MILLIMETERS * (consigne_du_generateur['offset'] + consigne_du_generateur['amplitude'] / 2)}mm, de période {1 / consigne_du_generateur['freq']}s, démarrant "
+                           match int(consigne_du_generateur['phase'] * 2 / pi + 0.05) :
+                              case 0 :
+                                 label_de_cette_consigne += "croissant au centre"
+                              case 1 :
+                                 label_de_cette_consigne += "à son maximum"
+                              case 2 :
+                                 label_de_cette_consigne += "décroissant au centre"
+                              case 3 :
+                                 label_de_cette_consigne += "à son minimum"
+                           condition_d_arret = consigne_du_generateur["condition"]
+                           if condition_d_arret is None :
+                              label_de_cette_consigne += ", dure indéfiniment"
+                           else :
+                              label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
 
                   cadre_de_cette_consigne = LabelFrame(cadre_interne_consignes)
                   cadre_de_cette_consigne.grid(row = (2 * indice_de_cette_consigne), column = 0, columnspan = 3, padx = 5, pady = 4, sticky = 'w' + 'e')
@@ -2060,7 +2457,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          else :
             if len(consignes_du_generateur) :
                Label(cadre_interne_consignes, text = "Consigne actuellement prévue :").grid(row = 0, column = 0, columnspan = 3, padx = 5, pady = 4)
-               label_de_cette_consigne = f"Tire le cable à {2 * consignes_du_generateur[2]['speed']}T/s"
+               label_de_cette_consigne = f"Tire le cable"# à {2 * consignes_du_generateur[2]['speed']}T/s"
                label_de_cette_consigne += f" jusqu'à {str(2 * float(consignes_du_generateur[2]['condition'][DEBUT_CONDITION_CHARGE:]))}T"
                Label(cadre_interne_consignes, text = label_de_cette_consigne).grid(row = 1, column = 0, columnspan = 3, padx = 5, pady = 4, sticky = 'we')
 
@@ -2081,22 +2478,25 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       fenetre_de_choix_des_consignes.rowconfigure(0, weight=1)
       fenetre_de_choix_des_consignes.columnconfigure(0, weight=1)
       fenetre_de_choix_des_consignes.columnconfigure(1, weight=0)
+      if verrou_production == OFF :
+         canevas = Canvas(fenetre_de_choix_des_consignes, width = 900, height = 500)
+         canevas.grid(row = 0, column = 0, sticky = (N, S, E, W))
+         canevas.rowconfigure(0, weight=1)
+         canevas.columnconfigure(0, weight=1)
+         y_scrollbar = ttk.Scrollbar(fenetre_de_choix_des_consignes, orient="vertical", command=canevas.yview)
+         y_scrollbar.grid(column=1, row=0, sticky=(N, S, E))
+         cadre_interne_consignes = ttk.Frame(canevas, width = 880)
+         cadre_interne_consignes.pack(in_ = canevas, expand = True, fill = BOTH)
+         
+         cadre_interne_consignes.bind("<Configure>", lambda _: canevas.configure(scrollregion = canevas.bbox("all")))
+         canevas.create_window((0, 0), window = cadre_interne_consignes, anchor = "nw")
+         canevas.configure(yscrollcommand=y_scrollbar.set)
 
-      canevas = Canvas(fenetre_de_choix_des_consignes, width = 750, height = 600)
-      canevas.grid(row = 0, column = 0, sticky = (N, S, E, W))
-      canevas.rowconfigure(0, weight=1)
-      canevas.columnconfigure(0, weight=1)
-      y_scrollbar = ttk.Scrollbar(fenetre_de_choix_des_consignes, orient="vertical", command=canevas.yview)
-      y_scrollbar.grid(column=2, row=0, sticky=(N, S, E))
-      cadre_interne_consignes = ttk.Frame(canevas)
-      cadre_interne_consignes.pack(expand = True)
-      
-      cadre_interne_consignes.bind("<Configure>", lambda _: canevas.configure(scrollregion = canevas.bbox("all")))
-      canevas.create_window((0, 0), window = cadre_interne_consignes, anchor = "nw")
-      canevas.configure(yscrollcommand=y_scrollbar.set)
-
-      cadre_interne_consignes.bind('<Enter>', lambda e : _bound_to_mousewheel(canevas, e))
-      cadre_interne_consignes.bind('<Leave>', lambda e : _unbound_to_mousewheel(canevas, e))
+         cadre_interne_consignes.bind('<Enter>', lambda e : _bound_to_mousewheel(canevas, e))
+         cadre_interne_consignes.bind('<Leave>', lambda e : _unbound_to_mousewheel(canevas, e))
+      else :
+         cadre_interne_consignes = ttk.Frame(fenetre_de_choix_des_consignes)
+         cadre_interne_consignes.pack(expand = True)
 
       actualisation_des_boutons()
       fenetre_de_choix_des_consignes.mainloop()
@@ -2120,7 +2520,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       if entrees[10]:
          pass # rajouter des trucs pour ISO-2307
       parametres.append('')
-      labels_voulus = ["t(s)", "Consigne(T)", "sortie_charge_brute", "sortie_charge_transformee", "Charge (Tonnes)", "sortie_position_brute"]
+      labels_voulus = ["t(s)", "Consigne(T)", "sortie_charge_brute", LABEL_SORTIE_EN_CHARGE, "Charge (T)", "sortie_position_brute", LABEL_SORTIE_EN_POSITION, "Position (mm)"]
       launch_crappy_event.wait()
       launch_crappy_event.clear()
       if launch_crappy_confirm :
@@ -2140,6 +2540,14 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                               #TODO : add lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt")
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
+      global test_effectue
+      test_effectue = True
+      return
+
+   def crappy_stopper():
+      stop_crappy_event.wait()
+      stop_crappy_event.clear()
+      stop_crappy()
 
    def start_crappy():
       """FR : Lance Crappy et empêche de le relancer dans le même test.
@@ -2148,50 +2556,54 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       desactiver_bouton(start_btn)
       activer_bouton(pause_btn)
       launch_crappy_event.set()
-      print("debug1")
       time.sleep(5)
-      print("debug2")
       fenetre_principale.lift()
 
-   def stop_crappy():
-      """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
+   def gros_bouton_rouge():
+      """TODO"""
+      try :
+         # activer_bouton(bouton_enregistrer_et_quitter)
+         desactiver_bouton(pause_btn)
+         # activer_bouton(enregistrer_btn)
+         # activer_bouton(mise_a_0_btn)
+         # activer_bouton(mise_a_tension_btn)
+         menu1.entryconfigure(2, state=NORMAL)
+         menu3.entryconfigure("Certificat", state = NORMAL)
+      except TclError :
+         pass # if stopped after the main window has been destroyed
+
+      stop_crappy()
+
+   def mise_en_tension():
       
-      EN : Stops Crappy and resets the valves' distributors."""
-      activer_bouton(bouton_enregistrer_et_quitter)
-      desactiver_bouton(pause_btn)
-      # activer_bouton(enregistrer_btn)
-      # activer_bouton(mise_a_0_btn)
-      # activer_bouton(mise_a_tension_btn)
-      menu1.entryconfigure(2, state=NORMAL)
+      gen_mise_en_tension = crappy.blocks.Generator(
+            path = [{"type": "ramp", 
+                     "speed": -0.5, 
+                     "condition" : LABEL_SORTIE_EN_POSITION + "<" + str(5 * COEF_MILLIMETERS_TO_VOLTS)},
+                     {'type': 'constant',
+                     'value': 0,
+                     'condition': "delay=0.01"}],
+            cmd_label = 'consigne',
+            spam = True,
+            freq = 50)
 
-      while len(liste_des_blocs_crappy_utilises) > 0 :
-         liste_des_blocs_crappy_utilises.pop().stop()
-      crappy.stop()
-      crappy.reset()
-      if not fake_test :
-         gen = crappy.blocks.Generator(path=[{'type': 'constant',
-                                 'value': 0,
-                                 'condition': "delay=0.01"}],
-                           cmd_label='commande_en_charge',
-                           spam=True)
+      carte_mise_en_tension = crappy.blocks.IOBlock(
+            name = "Nidaqmx",
+            labels = ["t(s)", "sortie_position_brute"],
+            cmd_labels = ["entree_decharge", "entree_charge"],
+            initial_cmd = [0.0, 0.0],
+            exit_values = [0.0, 0.0],
+            channels=[{'name': 'Dev2/ao0'},
+                     {'name': 'Dev2/ao1'},
+                     {'name': 'Dev2/ai6'},
+                     {'name': 'Dev2/ai7'}],
+            spam = True,
+            freq = 50)
+      liste_des_blocs_crappy_utilises.append(carte_mise_en_tension)
 
-         carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
-                                       labels=["t(s)", "sortie_charge_brute", "sortie_position_brute"],
-                                       cmd_labels=["commande_en_charge", "commande_en_charge"],
-                                       initial_cmd=[0.0, 0.0],
-                                       exit_values=[0.0, 0.0],
-                                       channels=[{'name': 'Dev2/ao0'},
-                                       {'name': 'Dev2/ao1'},
-                                       {'name': 'Dev2/ai6'},
-                                       {'name': 'Dev2/ai7'}])
 
-         crappy.link(gen, carte_NI)
-         Thread(target = crappy.start).start()
-         time.sleep(3)
-         carte_NI.stop()
-         gen.stop()
-         crappy.stop()
-         crappy.reset()
+   def retour_en_position_initiale():
+      pass
 
 ##################################################################################################################################
 
@@ -2240,8 +2652,34 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          if type_d_asservissement != 0 :
             choix_des_consignes_du_generateur()      
 
+   global tonnage_limite
+   match entrees[3] :
+      case 1 :
+         tonnage_limite = 20
+      case 2 :
+         tonnage_limite = 16.6
+      case 3 :
+         tonnage_limite = 14
+      case 4 :
+         tonnage_limite = 12
+      case 5 :
+         tonnage_limite = 10
 
+   # pour créer le .xlsx :
+   nom_du_fichier_xlsx = lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt"
+                           ) + str(datetime.datetime.now())[:11] + entrees[0] + ".xlsx"
+   if path.exists(nom_du_fichier_xlsx):
+      # If the file already exists, append a number to the name
+      nom_du_fichier, extension = path.splitext(nom_du_fichier_xlsx)
+      i = 1
+      while path.exists(nom_du_fichier + "_%05d" % i + extension):
+         i += 1
+      nom_du_fichier_xlsx = nom_du_fichier + "_%05d" % i + extension
+   # print("____")
+   # print(nom_du_fichier_xlsx, "debug xlsx")
+   
    Thread(target = crappy_launcher, daemon = True).start()
+   Thread(target = crappy_stopper, daemon = True).start()
 
 
 
@@ -2270,7 +2708,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    valeur_maximale_de_charge.set(-10000)
 
    # vrac
-   tonnage_max=IntVar()
    mode_manuel=StringVar()
    mode_manuel.set('off')
 
@@ -2299,19 +2736,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    normes=StringVar()
    commentaires_de_l_utilisateur = StringVar()
 
-   
-   match entrees[3] :
-      case 1 :
-         tonnage_max.set(20)
-      case 2 :
-         tonnage_max.set(16.6)
-      case 3 :
-         tonnage_max.set(14)
-      case 4 :
-         tonnage_max.set(12)
-      case 5 :
-         tonnage_max.set(10)
-   
    # nom=crea_nom(1)
    # workbook = xlsxwriter.Workbook(nom)
    # chartsheet = workbook.add_chartsheet()
@@ -2353,12 +2777,12 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    zone_com=Entry( zone_com_label, textvariable= commentaires_de_l_utilisateur, width=25)
    
    start_btn=Button(cadre_interne, text='Start', command=start_crappy)
-   pause_btn=Button(cadre_interne, text='Pause', command=stop_crappy,bg='red')
+   pause_btn=Button(cadre_interne, text='Pause', command=gros_bouton_rouge,bg='red')
    bouton_enregistrer_et_quitter=Button(cadre_interne, text='Quitter et enregistrer', command=enregistrer_et_quitter)
    # mise_a_0_btn=Button(cadre_interne, text=' Mise à 0 ',command=mise_a_0_fct)
    # mise_a_tension_btn=Button(cadre_interne, text=' Mise à tension ',command=mise_a_tension_fct)
    # bouton_parametrage_consigne = Button(cadre_interne, text=' ',bg='red',command=choix_du_type_d_asservissement)
-   enregistrer_btn=Button(cadre_interne, text=' ', command=choix_des_documents_a_consever)
+   enregistrer_btn=Button(cadre_interne, text=' ', command=choix_des_documents_a_conserver)
    
    img1 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_enregistrer.png") # make sure to add "/" not "\"
    enregistrer_btn.config(image=img1)
@@ -2401,11 +2825,12 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
    
    menu2 = Menu(menubar, tearoff=0)
-   menu2.add_command(label="Choix documents",command=choix_des_documents_a_consever)
+   menu2.add_command(label="Choix documents",command=choix_des_documents_a_conserver)
    menubar.add_cascade(label="Enregistrer", menu=menu2)
    
    menu3 = Menu(menubar, tearoff=0)
-   menu3.add_command(label="Certificat",command=certif_fct)
+   menu3.add_command(label="Certificat",command=creation_de_certificat)
+   menu3.entryconfigure("Certificat", state = DISABLED)
    # menu3.add_command(label="Ecran secondaire",command=fenetre_d_affichage_secondaire)
    menubar.add_cascade(label="Créer", menu=menu3)
    
@@ -2426,6 +2851,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    
    fenetre_principale.mainloop()
 
+   # thread_de_lancement_de_crappy.join()
    launch_crappy_event.clear()
    return fonction_principale(*entrees[:10], type_d_asservissement)
 
