@@ -26,6 +26,7 @@ from win32com.client import Dispatch   # pip install pywin32
 import crappy
 import customblocks
 import custom_generator
+import custom_pid
 # import custom_multiplex
 # import custom_grapher
 # import custom_dashboard
@@ -95,6 +96,7 @@ DOSSIER_ENREGISTREMENTS = lecture_donnee("dossier_enregistrements.txt") + SEPARA
 liste_des_blocs_crappy_utilises = []  
 launch_crappy_event = Event()
 launch_crappy_confirm = True
+start_generator = False
 stop_crappy_event = Event()
 test_effectue = False
 charge_max = -10
@@ -163,6 +165,16 @@ def tons_to_volts(tons) :
    return round(tons/2, 2)
 #V
 ### Fonctions de vérification des entrées des utilisateurs
+def _check_entree_float(new_value):
+   """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
+   
+   EN : Prevent the user from entering incorrect values."""
+   if new_value == "" :
+      return True
+   if re.match("^[0-9]+\.?[0-9]*$", new_value) is None and re.match("^[0-9]*\.?[0-9]+$", new_value) is None :
+      return False
+   return True
+#V
 def _check_entree_charge(new_value):
    """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
    
@@ -289,6 +301,9 @@ def _card_to_pid_and_generator(dic):
    """FR : Étalonne la tension renvoyée par le capteur d'efforts.
    
    EN : Calibrates the voltage fed back by the effort sensor."""
+   global start_generator
+   if start_generator :
+      return {}
    if "sortie_charge_brute" not in dic.keys() or "sortie_position_brute" not in dic.keys() :
       dic["t(s)"] = time.time()
       dic [LABEL_SORTIE_EN_CHARGE] = 0.0
@@ -369,7 +384,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
 
-   pid_charge = crappy.blocks.PID(kp=1,
+   pid_charge = custom_pid.PID(kp=1,
                                  ki=0.01,
                                  kd=0.1,
                                  out_max=5,
@@ -381,7 +396,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
-   pid_decharge = crappy.blocks.PID(kp=0.3,
+   pid_decharge = custom_pid.PID(kp=0.3,
                                     ki=0.01,
                                     kd=0.1,
                                     out_max=5,
@@ -470,7 +485,7 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
 
-   pid_charge = crappy.blocks.PID(kp=1,
+   pid_charge = custom_pid.PID(kp=1,
                                  ki=0.01,
                                  kd=0.01,
                                  out_max=5,
@@ -482,7 +497,7 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
-   pid_decharge = crappy.blocks.PID(kp=0.5,
+   pid_decharge = custom_pid.PID(kp=0.5,
                                     ki=0.0,
                                     kd=0.0,
                                     out_max=5,
@@ -521,11 +536,11 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
 
-   gen = custom_generator.Generator(path = consignes_generateur,
+   gen = crappy.blocks.Generator(path = consignes_generateur,
                                  cmd_label = 'consigne',
                                  spam = True,
                                  freq = 50,
-                              blocks_list = liste_des_blocs_crappy_utilises)
+                                 trig_link = 0)
    liste_des_blocs_crappy_utilises.append(gen)
 
    crappy.link(gen, y_charge)
@@ -583,7 +598,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                                           plastic_law = plastic)
    liste_des_blocs_crappy_utilises.append(carte_NI)
    
-   pid_charge = crappy.blocks.PID(kp=1,
+   pid_charge = custom_pid.PID(kp=1,
                                  ki=0.0,
                                  kd=0.0,
                                  out_max=5,
@@ -620,11 +635,10 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
    liste_des_blocs_crappy_utilises.append(pancarte)
 
    gen = crappy.blocks.Generator(path = consignes_generateur,
-                              cmd_label = 'consigne',
-                              spam = True,
-                              freq = 50
-                              # , blocks_list = liste_des_blocs_crappy_utilises.copy()
-                              )
+                                 cmd_label = 'consigne',
+                                 spam = True,
+                                 freq = 50,
+                                 trig_link = 0)
    liste_des_blocs_crappy_utilises.append(gen)
    
    crappy.link(gen, y_charge)
@@ -686,161 +700,10 @@ def stop_crappy():
    if __name__ == "__main__" :
       print("--------------debug------------------")
 
-def coef_PID_par_defaut():
-   """FR : Renvoie la liste des coefficients par défaut de tous les PID.
-   
-   EN : Returns the list of the default coefficients of all PIDs."""
-   liste_coef=[]
-   #######################charge/decharge################
-   ############charge#########
-   ###position
-   P_charge_pos=6
-   I_charge_pos=0
-   D_charge_pos=0
-   liste_coef.append(P_charge_pos)
-   liste_coef.append(I_charge_pos)
-   liste_coef.append(D_charge_pos)
-   ###charge_de_rupture
-   P_charge_rupture=1
-   I_charge_rupture=0.01
-   D_charge_rupture=0.01
-   liste_coef.append(P_charge_rupture)
-   liste_coef.append(I_charge_rupture)
-   liste_coef.append(D_charge_rupture)
-   ###préétirage
-   P_charge_pree=0.2
-   I_charge_pree=0.001
-   D_charge_pree=1
-   liste_coef.append(P_charge_pree)
-   liste_coef.append(I_charge_pree)
-   liste_coef.append(D_charge_pree)
-   ###fatigue
-   P_charge_fatigue=0.5  
-   I_charge_fatigue=0.001
-   D_charge_fatigue=0.5
-   liste_coef.append(P_charge_fatigue)
-   liste_coef.append(I_charge_fatigue)
-   liste_coef.append(D_charge_fatigue)
-   ###palier
-   P_charge_pal=1
-   I_charge_pal=0.001
-   D_charge_pal=0.1
-   liste_coef.append(P_charge_pal)
-   liste_coef.append(I_charge_pal)
-   liste_coef.append(D_charge_pal)
-   ############décharge#########
-   ###position
-   P_decharge_pos=2
-   I_decharge_pos=0
-   D_decharge_pos=0
-   liste_coef.append(P_decharge_pos)
-   liste_coef.append(I_decharge_pos)
-   liste_coef.append(D_decharge_pos)
-   ###charge_de_rupture
-   P_decharge_rupture=0
-   I_decharge_rupture=0
-   D_decharge_rupture=0
-   liste_coef.append(P_decharge_rupture)
-   liste_coef.append(I_decharge_rupture)
-   liste_coef.append(D_decharge_rupture)
-   ###préétirage
-   P_decharge_pree=0.05
-   I_decharge_pree=0
-   D_decharge_pree=0.003
-   liste_coef.append(P_decharge_pree)
-   liste_coef.append(I_decharge_pree)
-   liste_coef.append(D_decharge_pree)
-   ###fatigue
-   P_decharge_fatigue=0.09
-   I_decharge_fatigue=0.0
-   D_decharge_fatigue=0.5
-   liste_coef.append(P_decharge_fatigue)
-   liste_coef.append(I_decharge_fatigue)
-   liste_coef.append(D_decharge_fatigue)
-   ###palier
-   P_decharge_pal=0.1
-   I_decharge_pal=0.0001
-   D_decharge_pal=0.0
-   liste_coef.append(P_decharge_pal)
-   liste_coef.append(I_decharge_pal)
-   liste_coef.append(D_decharge_pal)
-   
-   #######################maintien################
-   ############charge#########
-   ###position
-   P_charge_pos=0.5
-   I_charge_pos=0.05
-   D_charge_pos=0.01
-   liste_coef.append(P_charge_pos)
-   liste_coef.append(I_charge_pos)
-   liste_coef.append(D_charge_pos)
-   ###charge_de_rupture
-   P_charge_rupture=0.1
-   I_charge_rupture=0.001
-   D_charge_rupture=0.01
-   liste_coef.append(P_charge_rupture)
-   liste_coef.append(I_charge_rupture)
-   liste_coef.append(D_charge_rupture)
-   ###préétirage
-   P_charge_pree=0.5
-   I_charge_pree=0.05
-   D_charge_pree=0.01
-   liste_coef.append(P_charge_pree)
-   liste_coef.append(I_charge_pree)
-   liste_coef.append(D_charge_pree)
-   ###fatigue
-   P_charge_fatigue=0.5  
-   I_charge_fatigue=0.05
-   D_charge_fatigue=0.01
-   liste_coef.append(P_charge_fatigue)
-   liste_coef.append(I_charge_fatigue)
-   liste_coef.append(D_charge_fatigue)
-   ###palier
-   P_charge_pal=0.5  
-   I_charge_pal=0.05
-   D_charge_pal=0.01
-   liste_coef.append(P_charge_pal)
-   liste_coef.append(I_charge_pal)
-   liste_coef.append(D_charge_pal)
-   ############décharge#########
-   ###position
-   P_decharge_pos=0.1
-   I_decharge_pos=0
-   D_decharge_pos=0
-   liste_coef.append(P_decharge_pos)
-   liste_coef.append(I_decharge_pos)
-   liste_coef.append(D_decharge_pos)
-   ###charge_de_rupture
-   P_decharge_rupture=0.1
-   I_decharge_rupture=0
-   D_decharge_rupture=0
-   liste_coef.append(P_decharge_rupture)
-   liste_coef.append(I_decharge_rupture)
-   liste_coef.append(D_decharge_rupture)
-   ###préétirage
-   P_decharge_pree=0.1
-   I_decharge_pree=0
-   D_decharge_pree=0
-   liste_coef.append(P_decharge_pree)
-   liste_coef.append(I_decharge_pree)
-   liste_coef.append(D_decharge_pree)
-   ###fatigue
-   P_decharge_fatigue=0.05
-   I_decharge_fatigue=0.01 
-   D_decharge_fatigue=0.01
-   liste_coef.append(P_decharge_fatigue)
-   liste_coef.append(I_decharge_fatigue)
-   liste_coef.append(D_decharge_fatigue)
-   ###palier
-   P_decharge_pal=0.1
-   I_decharge_pal=0
-   D_decharge_pal=0
-   liste_coef.append(P_decharge_pal)
-   liste_coef.append(I_decharge_pal)
-   liste_coef.append(D_decharge_pal)
-   
-   return liste_coef
-#V
+def turn_on_generator():
+   global start_generator
+   start_generator = True
+
 def transformation_capteur_de_position(x):
 #TODO : constantes WTF
    #convertion tension lue par le capteur ultrason -> tension étalonnée pour ne pas dépasser les valeurs limites en distance
@@ -862,6 +725,7 @@ def modification_du_mot_de_passe(parent):
    """FR : Fenêtre de changement du mot de passe.
    
    EN : Password change window."""
+
    def enregistrer_mot_de_passe():
       """FR : Enregistre le nouveau mot de passe dans un fichier de config prédéfini.
       
@@ -887,7 +751,7 @@ def modification_des_chemins_d_acces(parent):
    manuel du banc.
    
    EN : Saved files' directory and bench's manual access path choice window."""
-   
+
    def chemin_suivant() :
       """FR : Enregistre les chemins dans un fichier de config prédéfini.
       
@@ -916,7 +780,93 @@ def modification_des_chemins_d_acces(parent):
    Button(fen_chem, text='Retour',command=fen_chem.destroy).grid(row=4,column=0,padx =10, pady =10)
    Button(fen_chem, text='Enregistrer',command=chemin_suivant).grid(row=4,column=1,padx =10, pady =10)
 #V
-def fct_depart() :
+def modification_des_PID(parent):
+   """FR : Fenêtre de choix des valeurs PID.
+   
+   EN : PID's values' choice window."""
+   def validation_des_nouveaux_PID():
+      """FR : Enregistre les valeurs des PID dans un fichier de config prédéfini.
+      
+      EN : Saves the PID's values in a predefined config file."""
+      dic_PID ={}
+      dic_PID["charge_P"] = charge_P.get()
+      dic_PID["charge_I"] = charge_I.get()
+      dic_PID["charge_D"] = charge_D.get()
+      dic_PID["decharge_P"] = decharge_P.get()
+      dic_PID["decharge_I"] = decharge_I.get()
+      dic_PID["decharge_D"] = decharge_D.get()
+      if type_de_materiau.get() == 0 :
+         fichier_des_PID = DOSSIER_CONFIG_ET_CONSIGNES + "pid_mou.json"
+      else :
+         fichier_des_PID = DOSSIER_CONFIG_ET_CONSIGNES + "pid_rigide.json"
+      with open(fichier_des_PID, 'w') as f :
+         dump(dic_PID, f)
+      fenetre_de_modification_des_PID.destroy()
+   #V
+   def valeurs_actuelles_des_PID():
+      """FR : Affiche les valeurs de PID correspondantes au type de matériau choisi.
+      
+      EN : Prints the PID's values corresponding to the chosen material's type."""
+      if type_de_materiau.get() == 0 :
+         with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_mou.json", 'r') as fichier_PID :
+            dic_PID = load (fichier_PID)
+      else :
+         with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_rigide.json", 'r') as fichier_PID :
+            dic_PID = load (fichier_PID)
+      charge_P.set(dic_PID["charge_P"])
+      charge_I.set(dic_PID["charge_I"])
+      charge_D.set(dic_PID["charge_D"])
+      decharge_P.set(dic_PID["decharge_P"])
+      decharge_I.set(dic_PID["decharge_I"])
+      decharge_D.set(dic_PID["decharge_D"])
+   #V
+   
+   fenetre_de_modification_des_PID = Toplevel(parent)
+
+   type_de_materiau = IntVar()
+
+   charge_P = DoubleVar()
+   charge_I = DoubleVar()
+   charge_D = DoubleVar()
+   decharge_P = DoubleVar()
+   decharge_I = DoubleVar()
+   decharge_D = DoubleVar()
+   dic_PID = {}
+   with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_mou.json", 'r') as fichier_PID :
+      dic_PID = load (fichier_PID)
+   charge_P.set(dic_PID["charge_P"])
+   charge_I.set(dic_PID["charge_I"])
+   charge_D.set(dic_PID["charge_D"])
+   decharge_P.set(dic_PID["decharge_P"])
+   decharge_I.set(dic_PID["decharge_I"])
+   decharge_D.set(dic_PID["decharge_D"])
+
+   Radiobutton(fenetre_de_modification_des_PID, text = "PID des matériaux mou", variable = type_de_materiau, value = 0, command = valeurs_actuelles_des_PID).grid(row = 0, column = 0, columnspan = 6, sticky = "w", padx = 5, pady = 5)
+   Radiobutton(fenetre_de_modification_des_PID, text = "PID des matériaux rigide", variable = type_de_materiau, value = 1, command = valeurs_actuelles_des_PID).grid(row = 1, column = 0, columnspan = 6, sticky = "w", padx = 5, pady = 5)
+
+   Label(fenetre_de_modification_des_PID, text = "PID de charge").grid(row = 4, column = 0, padx = 5, pady = 5)
+   Label(fenetre_de_modification_des_PID, text = "P").grid(row = 5, column = 1, padx = 5, pady = 5)
+   Entry(fenetre_de_modification_des_PID, textvariable = charge_P, width = 5, validate = "key", validatecommand = (fenetre_de_modification_des_PID.register(_check_entree_float), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
+   Label(fenetre_de_modification_des_PID, text = "I").grid(row = 5, column = 3, padx = 5, pady = 5)
+   Entry(fenetre_de_modification_des_PID, textvariable = charge_I, width = 5, validate = "key", validatecommand = (fenetre_de_modification_des_PID.register(_check_entree_float), '%P')).grid(row = 5, column = 4, padx = 5, pady = 5)
+   Label(fenetre_de_modification_des_PID, text = "D").grid(row = 5, column = 5, padx = 5, pady = 5)
+   Entry(fenetre_de_modification_des_PID, textvariable = charge_D, width = 5, validate = "key", validatecommand = (fenetre_de_modification_des_PID.register(_check_entree_float), '%P')).grid(row = 5, column = 6, padx = 5, pady = 5)
+   
+   Label(fenetre_de_modification_des_PID, text = "PID de charge").grid(row = 6, column = 0, padx = 5, pady = 5)
+   Label(fenetre_de_modification_des_PID, text = "P").grid(row = 7, column = 1, padx = 5, pady = 5)
+   Entry(fenetre_de_modification_des_PID, textvariable = decharge_P, width = 5, validate = "key", validatecommand = (fenetre_de_modification_des_PID.register(_check_entree_float), '%P')).grid(row = 7, column = 2, padx = 5, pady = 5)
+   Label(fenetre_de_modification_des_PID, text = "I").grid(row = 7, column = 3, padx = 5, pady = 5)
+   Entry(fenetre_de_modification_des_PID, textvariable = decharge_I, width = 5, validate = "key", validatecommand = (fenetre_de_modification_des_PID.register(_check_entree_float), '%P')).grid(row = 7, column = 4, padx = 5, pady = 5)
+   Label(fenetre_de_modification_des_PID, text = "D").grid(row = 7, column = 5, padx = 5, pady = 5)
+   Entry(fenetre_de_modification_des_PID, textvariable = decharge_D, width = 5, validate = "key", validatecommand = (fenetre_de_modification_des_PID.register(_check_entree_float), '%P')).grid(row = 7, column = 6, padx = 5, pady = 5)
+
+   Button(fenetre_de_modification_des_PID, text = "Retour", command = fenetre_de_modification_des_PID.destroy).grid(row = 8, column = 0, columnspan = 3, padx = 5, pady = 5)
+   Button(fenetre_de_modification_des_PID, text = "Valider", command = validation_des_nouveaux_PID).grid(row = 8, column = 4, columnspan = 3, padx = 5, pady = 5)
+
+   with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_personnalise.json", 'r') as fichier_PID :
+      dic_PID = load (fichier_PID)
+#V
+def demarrage_du_programme() :
    """FR : Fenêtre de choix du mode. Est lancée au début du programme.
    
    EN : Mode choice window. Is launched at the start of the program."""
@@ -986,23 +936,29 @@ def configuration_initiale (init_titre, init_nom,
    """FR : Fenêtre de configuration des valeurs initiales de l'essai.
    
    EN : Test's initial values configuration window."""
-   global verrou_production
-   
+
    def retour_au_choix_de_mode():
       """FR : Retourne à la fenêtre du choix de mode.
       
       EN : Gets back to the mode choice window."""
       global verrou_production
-      fenetre2.destroy()
+      fenetre_des_entrees.destroy()
       verrou_production = RESTART
    #V
+   def validation_des_entrees() :
+      nonlocal dic_PID
+      if choix_PID.get() == 2 :
+         with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_personalise.json", 'w') as fichier_PID_perso :
+            dump (dic_PID, fichier_PID_perso)
+      fenetre_des_entrees.destroy()
+
    def diam_cabestan(afficher):
       ###affiche la valeur du diamètre de cabestan si la case est cochée
       if afficher :
-         Label(accroche_label,text="Diamètre cabestan (mm)").grid(row=15,column=0,padx =10, pady =10)
-         Entry(accroche_label, textvariable=diametre_du_cabestan, width=10).grid(row=15,column=1,padx =10, pady =10)
+         Label(cadre_choix_type_d_accroche,text="Diamètre cabestan (mm)").grid(row=15,column=0,padx =10, pady =10)
+         Entry(cadre_choix_type_d_accroche, textvariable=diametre_du_cabestan, width=10).grid(row=15,column=1,padx =10, pady =10)
       else :
-         for widget in accroche_label.winfo_children()[-2:] :
+         for widget in cadre_choix_type_d_accroche.winfo_children()[-2:] :
             widget.destroy()
    #PV   facultatif
    def iso_quai():
@@ -1018,9 +974,50 @@ def configuration_initiale (init_titre, init_nom,
          for widget in cordage_label.winfo_children()[1:] :
             widget.destroy()
    #PV   facultatif
-   fenetre2 = Tk()
-   fenetre2.title("Configuration initiale")
-   fenetre2.protocol("WM_DELETE_WINDOW", exit)
+   def choix_PID_custom():
+      nonlocal dic_PID
+      match choix_PID.get() :
+         case 2 :
+            Label(cadre_PID, text = "PID de charge").grid(row = 4, column = 0, padx = 5, pady = 5)
+            Label(cadre_PID, text = "P").grid(row = 5, column = 1, padx = 5, pady = 5)
+            Entry(cadre_PID, textvariable = charge_P, width = 5, validate = "key", validatecommand = (fenetre_des_entrees.register(_check_entree_float), '%P')).grid(row = 5, column = 2, padx = 5, pady = 5)
+            Label(cadre_PID, text = "I").grid(row = 5, column = 3, padx = 5, pady = 5)
+            Entry(cadre_PID, textvariable = charge_I, width = 5, validate = "key", validatecommand = (fenetre_des_entrees.register(_check_entree_float), '%P')).grid(row = 5, column = 4, padx = 5, pady = 5)
+            Label(cadre_PID, text = "D").grid(row = 5, column = 5, padx = 5, pady = 5)
+            Entry(cadre_PID, textvariable = charge_D, width = 5, validate = "key", validatecommand = (fenetre_des_entrees.register(_check_entree_float), '%P')).grid(row = 5, column = 6, padx = 5, pady = 5)
+            
+            Label(cadre_PID, text = "PID de charge").grid(row = 6, column = 0, padx = 5, pady = 5)
+            Label(cadre_PID, text = "P").grid(row = 7, column = 1, padx = 5, pady = 5)
+            Entry(cadre_PID, textvariable = decharge_P, width = 5, validate = "key", validatecommand = (fenetre_des_entrees.register(_check_entree_float), '%P')).grid(row = 7, column = 2, padx = 5, pady = 5)
+            Label(cadre_PID, text = "I").grid(row = 7, column = 3, padx = 5, pady = 5)
+            Entry(cadre_PID, textvariable = decharge_I, width = 5, validate = "key", validatecommand = (fenetre_des_entrees.register(_check_entree_float), '%P')).grid(row = 7, column = 4, padx = 5, pady = 5)
+            Label(cadre_PID, text = "D").grid(row = 7, column = 5, padx = 5, pady = 5)
+            Entry(cadre_PID, textvariable = decharge_D, width = 5, validate = "key", validatecommand = (fenetre_des_entrees.register(_check_entree_float), '%P')).grid(row = 7, column = 6, padx = 5, pady = 5)
+
+            with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_personnalise.json", 'r') as fichier_PID :
+               dic_PID = load (fichier_PID)
+         case 1 :
+            for widget in cadre_PID.winfo_children()[3:] :
+               widget.destroy()
+            with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_rigide.json", 'r') as fichier_PID :
+               dic_PID = load (fichier_PID)
+         case 0 :
+            for widget in cadre_PID.winfo_children()[3:] :
+               widget.destroy()
+            with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_mou.json", 'r') as fichier_PID :
+               dic_PID = load (fichier_PID)
+      charge_P.set(dic_PID["charge_P"])
+      charge_I.set(dic_PID["charge_I"])
+      charge_D.set(dic_PID["charge_D"])
+      decharge_P.set(dic_PID["decharge_P"])
+      decharge_I.set(dic_PID["decharge_I"])
+      decharge_D.set(dic_PID["decharge_D"])
+   #V
+   global verrou_production
+
+   fenetre_des_entrees = Tk()
+   fenetre_des_entrees.title("Configuration initiale")
+   fenetre_des_entrees.protocol("WM_DELETE_WINDOW", exit)
 
    titre = StringVar()
    titre.set(init_titre)
@@ -1043,28 +1040,45 @@ def configuration_initiale (init_titre, init_nom,
    longueur_utile = DoubleVar()
    longueur_utile.set(init_lg_utile)
    is_test_iso = BooleanVar()
+
+   choix_PID = IntVar()
+   charge_P = DoubleVar()
+   charge_I = DoubleVar()
+   charge_D = DoubleVar()
+   decharge_P = DoubleVar()
+   decharge_I = DoubleVar()
+   decharge_D = DoubleVar()
+   dic_PID = {}
+   with open(DOSSIER_CONFIG_ET_CONSIGNES + "pid_mou.json", 'r') as fichier_PID :
+      dic_PID = load (fichier_PID)
+   charge_P.set(dic_PID["charge_P"])
+   charge_I.set(dic_PID["charge_I"])
+   charge_D.set(dic_PID["charge_D"])
+   decharge_P.set(dic_PID["decharge_P"])
+   decharge_I.set(dic_PID["decharge_I"])
+   decharge_D.set(dic_PID["decharge_D"])
    
-   Label( fenetre2, text = "Titre").grid(row=1,column=0,padx =5, pady =5)
-   entree_titre=Entry( fenetre2, textvariable=titre, width=30, validate="key", validatecommand=(fenetre2.register(_check_entree_string), '%P'))
+   Label( fenetre_des_entrees, text = "Titre").grid(row=1,column=0,padx =5, pady =5)
+   entree_titre=Entry( fenetre_des_entrees, textvariable=titre, width=30, validate="key", validatecommand=(fenetre_des_entrees.register(_check_entree_string), '%P'))
    entree_titre.grid(row=1,column=1,padx =5, pady =5)
 
-   Label( fenetre2, text = "Nom de l'opérateur").grid(row=2,column=0,padx =5, pady =5)
-   entree_nom=Entry( fenetre2, textvariable=nom, width=30, validate="key", validatecommand=(fenetre2.register(_check_entree_string), '%P'))
+   Label( fenetre_des_entrees, text = "Nom de l'opérateur").grid(row=2,column=0,padx =5, pady =5)
+   entree_nom=Entry( fenetre_des_entrees, textvariable=nom, width=30, validate="key", validatecommand=(fenetre_des_entrees.register(_check_entree_string), '%P'))
    entree_nom.grid(row=2,column=1,padx =5, pady =5)
 
-   Label( fenetre2, text = "Matériau").grid(row=4,column=0,padx =5, pady =5)
-   entree_materiau=Entry( fenetre2, textvariable=materiau, width=30, validate="key", validatecommand=(fenetre2.register(_check_entree_string), '%P'))
+   Label( fenetre_des_entrees, text = "Matériau").grid(row=4,column=0,padx =5, pady =5)
+   entree_materiau=Entry( fenetre_des_entrees, textvariable=materiau, width=30, validate="key", validatecommand=(fenetre_des_entrees.register(_check_entree_string), '%P'))
    entree_materiau.grid(row=4,column=1,padx =5, pady =5)
 
-   Label( fenetre2, text = "Charge de rupture (en tonnes)").grid(row=6,column=0,padx =5, pady =5)
-   entree_charge_rupture=Entry( fenetre2, textvariable=charge_de_rupture, width=5, validate="key", validatecommand=(fenetre2.register(_check_entree_charge), '%P'))
+   Label( fenetre_des_entrees, text = "Charge de rupture (en tonnes)").grid(row=6,column=0,padx =5, pady =5)
+   entree_charge_rupture=Entry( fenetre_des_entrees, textvariable=charge_de_rupture, width=5, validate="key", validatecommand=(fenetre_des_entrees.register(_check_entree_charge), '%P'))
    entree_charge_rupture.grid(row=6,column=1,padx =5, pady =5, sticky = "w")
 
-   Label(fenetre2,text="Longueur de l'éprouvette (en m)").grid(row = 7, column = 0, padx = 5, pady = 5)
-   Entry(fenetre2, textvariable=longueur_utile, width=5, validate="key", validatecommand=(fenetre2.register(_check_entree_longueur), '%P')).grid(row = 7, column = 1, padx = 5, pady = 5, sticky = "w")
+   Label(fenetre_des_entrees,text="Longueur de l'éprouvette (en m)").grid(row = 7, column = 0, padx = 5, pady = 5)
+   Entry(fenetre_des_entrees, textvariable=longueur_utile, width=5, validate="key", validatecommand=(fenetre_des_entrees.register(_check_entree_longueur), '%P')).grid(row = 7, column = 1, padx = 5, pady = 5, sticky = "w")
          
-   cadre_longueur_banc=LabelFrame( fenetre2)
-   cadre_longueur_banc.grid(row=8,column=0,columnspan=3,padx =5, pady =5)
+   cadre_longueur_banc=LabelFrame( fenetre_des_entrees)
+   cadre_longueur_banc.grid(row = 8, column = 0, columnspan = 3, padx = 5, pady = 5, sticky = "ew")
    Label(cadre_longueur_banc, text = 'Longueur utile du banc').grid(row=8,column=0,padx =5, pady =5)
    coche20m = Radiobutton(cadre_longueur_banc, text="<20m", variable=longueur_banc, value=1)
    coche20m.grid(row=8,column=1,padx =5, pady =5)
@@ -1078,39 +1092,47 @@ def configuration_initiale (init_titre, init_nom,
       coche9m = Radiobutton(cadre_longueur_banc, text="7m (pour une pièce métallique)", variable=longueur_banc, value=5)
       coche9m.grid(row=12,column=1,padx =5, pady =5)
 
-      accroche_label=LabelFrame(fenetre2)
-      accroche_label.grid(row = 13, column = 0,columnspan = 3, padx = 5, pady = 5, sticky = "ew")
-      Label(accroche_label, text = "Système d'accroche").grid(row=13,column=0,padx =5, pady =5)
-      coche_axial= Radiobutton(accroche_label, text="Goupilles", variable=type_d_accroche, value=1, command = lambda : diam_cabestan(False))
+      cadre_choix_type_d_accroche=LabelFrame(fenetre_des_entrees)
+      cadre_choix_type_d_accroche.grid(row = 13, column = 0,columnspan = 3, padx = 5, pady = 5, sticky = "ew")
+      Label(cadre_choix_type_d_accroche, text = "Système d'accroche").grid(row=13,column=0,padx =5, pady =5)
+      coche_axial= Radiobutton(cadre_choix_type_d_accroche, text="Goupilles", variable=type_d_accroche, value=1, command = lambda : diam_cabestan(False))
       coche_axial.grid(row=13,column=1,padx =5, pady =5)
-      coche_cabestan = Radiobutton(accroche_label, text="Amarrage à cabestan", variable=type_d_accroche, value=2, command = lambda : diam_cabestan(True))
+      coche_cabestan = Radiobutton(cadre_choix_type_d_accroche, text="Amarrage à cabestan", variable=type_d_accroche, value=2, command = lambda : diam_cabestan(True))
       coche_cabestan.grid(row=14,column=1,padx =5, pady =5)
       
-      cordage_label=LabelFrame(fenetre2)
+      cordage_label=LabelFrame(fenetre_des_entrees)
       cordage_label.grid(row=16,column=0,columnspan=3,padx =5, pady =5, sticky = "ew")
       ttk.Checkbutton(cordage_label, text = "Test ISO-2307", variable = is_test_iso, onvalue = True, offvalue = False, command = iso_quai).grid(row = 0, column = 0, columnspan = 3, padx = 5, pady = 5, sticky = "w")
-      
+
+   cadre_PID = LabelFrame(fenetre_des_entrees)
+   cadre_PID.grid(row = 17, column = 0, columnspan = 3, padx = 5, pady = 5, sticky = "ew")
+   Radiobutton(cadre_PID, text = "Matériau mou", variable = choix_PID, value = 0, command = choix_PID_custom).grid(row = 0, column = 0, columnspan = 6, sticky = "w", padx = 5, pady = 5)
+   Radiobutton(cadre_PID, text = "Matériau rigide", variable = choix_PID, value = 1, command = choix_PID_custom).grid(row = 1, column = 0, columnspan = 6, sticky = "w", padx = 5, pady = 5)
+   if verrou_production == OFF :
+      Radiobutton(cadre_PID, text = "PID personnalisé", variable = choix_PID, value = 2, command = choix_PID_custom).grid(row = 2, column = 0, columnspan = 6, sticky = "w", padx = 5, pady = 5)
+
+
    charger_le_dernier_test = BooleanVar()
    charger_le_dernier_test.set(True)
    if verrou_production == OFF :
-      ttk.Checkbutton(fenetre2, text = "Charger les consignes du dernier test", variable = charger_le_dernier_test, onvalue = True, offvalue = False).grid(row = 18, column = 0, columnspan = 2, padx = 5, pady = 5)
+      ttk.Checkbutton(fenetre_des_entrees, text = "Charger les consignes du dernier test", variable = charger_le_dernier_test, onvalue = True, offvalue = False).grid(row = 18, column = 0, columnspan = 2, padx = 5, pady = 5)
 
    
-   precedent1_btn=Button(fenetre2, text='Précédent', command=retour_au_choix_de_mode)
+   precedent1_btn=Button(fenetre_des_entrees, text='Précédent', command=retour_au_choix_de_mode)
    precedent1_btn.grid(row=20, column=0,padx =5, pady =5)
-   suivant1_btn=Button(fenetre2, text='Suivant', command=fenetre2.destroy)
+   suivant1_btn=Button(fenetre_des_entrees, text='Suivant', command = validation_des_entrees)
    suivant1_btn.grid(row=20, column=1,padx =5, pady =5)
 
-   menubar = Menu(fenetre2)
-   fenetre2.config(menu=menubar)
+   menubar = Menu(fenetre_des_entrees)
+   fenetre_des_entrees.config(menu=menubar)
    menu= Menu(menubar, tearoff=0)
    menubar.add_cascade(label="Autre", menu=menu)
    menu.add_command(label="Afficher la documentation",command=RTM_protocol)
    if verrou_production==0 :
-      menu.add_command(label="Modifier les chemins d'accès",command=lambda: modification_des_chemins_d_acces(fenetre2))
-      menu.add_command(label="Modifier le mot de passe",command=lambda: modification_du_mot_de_passe(fenetre2))
+      menu.add_command(label="Modifier les chemins d'accès",command=lambda: modification_des_chemins_d_acces(fenetre_des_entrees))
+      menu.add_command(label="Modifier le mot de passe",command=lambda: modification_du_mot_de_passe(fenetre_des_entrees))
 
-   fenetre2.mainloop()
+   fenetre_des_entrees.mainloop()
    
    return (titre.get(),nom.get(),materiau.get(),longueur_banc.get(),charge_de_rupture.get(),diametre_a_vide.get(),type_d_accroche.get(),est_episse.get(),diametre_du_cabestan.get(),longueur_utile.get(), is_test_iso.get(), charger_le_dernier_test.get())
 #PV obligatoire (tix)
@@ -1502,18 +1524,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
  #TODO : Gérer les différents PID et leur réglage. 
  #       Voir sensi_page() et reglage_des_coef_des_PID() dans les fonctions jetées.
 
-   def reinitialiser ():
-      ###fonction de réinitialisation de la consigne et des valeurs utilisé lors de l'animation
-      
-      choix_des_documents_a_enregistrer.set(1)
-      
-      desactiver_bouton(start_btn)
-      activer_bouton(bouton_enregistrer_et_quitter)
-      desactiver_bouton(pause_btn)
-      
-      showinfo('Info','Consigne réinitialisée !')
-      return 0
-
    def modif_etalonnage_fct():
       ###fenêtre de modification du mot de passe
       def modif_etalonnage_suite():
@@ -1552,7 +1562,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       etal_c_entree.grid(row=3,column=1,padx =10, pady =10)
       retour_btn.grid(row=4,column=0,padx =10, pady =10)
       suivant_btn.grid(row=4,column=1,padx =10, pady =10)
-   
+
    def choix_du_type_d_asservissement(type_d_asservissement_actuel = 0):
       """FR : Fenêtre pour choisir si l'asservissement doit se faire en position ou
       en charge.
@@ -2553,7 +2563,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       """FR : Lance Crappy et empêche de le relancer dans le même test.
       
       EN : Launches Crappy and disables launching it again in the same test."""
-      desactiver_bouton(start_btn)
+      desactiver_bouton(bouton_de_demarrage_de_crappy)
+      activer_bouton(bouton_de_demarrage_du_generateur)
       activer_bouton(pause_btn)
       launch_crappy_event.set()
       time.sleep(5)
@@ -2601,7 +2612,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_mise_en_tension)
 
-
    def retour_en_position_initiale():
       pass
 
@@ -2615,7 +2625,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          init_materiau, init_lg_banc, init_charge_rupt, init_diam_a_vide, 
          init_accroche, init_epissage, init_cabestan, init_lg_utile)
       if verrou_production == RESTART:
-         return fct_depart()
+         return demarrage_du_programme()
       if entrees[10] :
          try :
             fichier_des_consignes_du_test_iso = open(DOSSIER_CONFIG_ET_CONSIGNES + "test_iso-2307.json", 'r')
@@ -2776,7 +2786,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
    zone_com=Entry( zone_com_label, textvariable= commentaires_de_l_utilisateur, width=25)
    
-   start_btn=Button(cadre_interne, text='Start', command=start_crappy)
+   bouton_de_demarrage_de_crappy=Button(cadre_interne, text = "Lancer l'enregistrement", command = start_crappy)
+   bouton_de_demarrage_du_generateur=Button(cadre_interne, text="Démarrer le test", command = turn_on_generator)
    pause_btn=Button(cadre_interne, text='Pause', command=gros_bouton_rouge,bg='red')
    bouton_enregistrer_et_quitter=Button(cadre_interne, text='Quitter et enregistrer', command=enregistrer_et_quitter)
    # mise_a_0_btn=Button(cadre_interne, text=' Mise à 0 ',command=mise_a_0_fct)
@@ -2791,7 +2802,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    img3 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_retour.png") # make sure to add "/" not "\"
    # mise_a_0_btn.config(image=img3)
    img6 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_play.png") # make sure to add "/" not "\"
-   start_btn.config(image=img6)
+   # bouton_de_demarrage_de_crappy.config(image=img6)
    img7 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_stop.png") # make sure to add "/" not "\"
    pause_btn.config(image=img7)
    img8 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_tension.png") # make sure to add "/" not "\"
@@ -2802,7 +2813,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    # img23 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "iso_image.png") # make sure to add "/" not "\"
    # img31 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "fatigue_image.png") # make sure to add "/" not "\"
    
-   start_btn.grid(row=0,column=13,padx =5, pady =5)
+   bouton_de_demarrage_de_crappy.grid(row=0,column=13,padx =5, pady =5)
+   bouton_de_demarrage_du_generateur.grid(row=1,column=13,padx =5, pady =5)
    pause_btn.grid(row=0,column=14,columnspan=2,padx =5, pady =5)
    bouton_enregistrer_et_quitter.grid(row=2,column=18,padx =5, pady =5)
    # bouton_parametrage_consigne.grid(row=1,column=14,padx =5, pady =5)
@@ -2812,15 +2824,13 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    zone_com.grid(row=1 ,column=18,columnspan=3,padx =5, pady =5)
    zone_com_label.grid(row=1 ,column=18,columnspan=3,padx =5, pady =5)
 
-   activer_bouton(start_btn)
-   activer_bouton(bouton_enregistrer_et_quitter)
-   activer_bouton(pause_btn)
+   desactiver_bouton(bouton_de_demarrage_du_generateur)
+   desactiver_bouton(pause_btn)
    
    menubar = Menu(fenetre_principale)
 
    menu1 = Menu(menubar, tearoff=0)
    menu1.add_command(label="Type d'asservissement")#,command = choix_du_type_d_asservissement)
-   menu1.add_command(label="Réinitialiser consigne",command=reinitialiser)
    menubar.add_cascade(label="Consigne", menu=menu1)
 
    
@@ -2842,6 +2852,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       menu4.add_command(label="Modifier les chemins d'accès",command=lambda: modification_des_chemins_d_acces(fenetre_principale))
       menu4.add_command(label="Modifier le mot de passe",command=lambda : modification_du_mot_de_passe(fenetre_principale))
       menu4.add_command(label="Modifier étalonnage du banc",command=modif_etalonnage_fct)
+      menu4.add_command(label="Modifier les PID",command=lambda : modification_des_PID(fenetre_principale))
    menu4.add_separator()
    menu4.add_command(label="Fenêtre précédente",command=retour_aux_entrees)
    menu4.add_command(label="Quitter",command=enregistrer_et_quitter)
@@ -2857,4 +2868,4 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
 
 if __name__ == '__main__':
-   fct_depart()
+   demarrage_du_programme()

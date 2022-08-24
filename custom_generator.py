@@ -27,10 +27,8 @@ class Generator(Block):
                       trig_link: str = None,
                       spam: bool = False,
                       verbose: bool = False,
-                      end_delay: float = 2
-                     #  ,stop_event = None
-                      , blocks_list = []
-                      ) -> None:
+                      end_delay: float = 2,
+                      safe_start = False) -> None:
       """Sets the args and initializes parent class.
 
       Args:
@@ -83,8 +81,7 @@ class Generator(Block):
       self.spam = spam
       self.verbose = verbose
       self.end_delay = end_delay
-      # self.stop_event = stop_event if stop_event else Event()
-      self.blocks_list = blocks_list
+      self._safe_start = safe_start
 
       if path is None:
          path = []
@@ -131,12 +128,8 @@ class Generator(Block):
       self.current_path.t0 = self.t0
 
    def loop(self) -> None:
-      if self.trig_link is not None:
-         da = self.inputs[self.trig_link].recv_chunk()
-         data = self.get_all_last(self.to_get)
-         data.update(da)
-      else:
-         data = self.get_all_last()
+      data = self.get_all_last(blocking = self._safe_start)
+      
       data[self.cmd_label] = [self.cmd]   # Add my own cmd to the dict
       for val in data.values() :                                           # modified
          if val[-1] == "safeguard" :                                       # modified
@@ -160,15 +153,3 @@ class Generator(Block):
       elif self.spam:
          self.send([self.last_t - self.t0, self.cmd, self.path_id])
       self.last_t = time()
-   
-   def stop_crappy(self):
-      """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
-      
-      EN : Stops Crappy and resets the valves' distributors."""
-      while len(self.blocks_list) > 0 :
-         bloc_a_supprimer = self.blocks_list.pop()
-         bloc_a_supprimer.stop()
-         try :
-            crappy.blocks.Block.instances.remove(bloc_a_supprimer)
-         except KeyError:
-            pass
