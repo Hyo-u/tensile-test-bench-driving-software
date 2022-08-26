@@ -249,7 +249,7 @@ class EmbeddedGrapher(crappy.blocks.Block):
       self.counter = [0 for _ in self._labels]
 
 class CustomRecorder(crappy.blocks.Recorder):
-   """FR : version qui rajoute nos paramètres au début du fichier.
+   """FR : Version qui rajoute nos paramètres au début du fichier.
 
    EN : Version that adds our parameters at top of the file."""
    def __init__(self, filename, delay = 2, labels = 't(s)', parametres_a_inscrire = {}):
@@ -264,12 +264,10 @@ class CustomRecorder(crappy.blocks.Recorder):
          :obj:`str` to save all labels but this one first, or a :obj:`list` to
          save only these labels.
       """
-
-      crappy.blocks.Block.__init__(self)
-      self.niceness = -5
-      self.delay = delay
-      self.filename = filename
-      self.labels = labels
+      crappy.blocks.Recorder.__init__(self, 
+                                      filename = filename, 
+                                      delay = delay, 
+                                      labels = labels)
       self.parametres_a_inscrire = parametres_a_inscrire 
 
    def begin(self):
@@ -292,9 +290,8 @@ class CustomRecorder(crappy.blocks.Recorder):
          # If we did not give them (False, [] or None):
          self.labels = list(sorted(r.keys()))
       with open(self.filename, 'w') as f:
-         for parametre in self.parametres_a_inscrire :
-            f.write(parametre + "\n")
-         # print(self.labels, "debug4")
+         for parametre in self.parametres_a_inscrire :      # modified
+            f.write(parametre + "\n")                       # modified
          f.write(", ".join(self.labels) + "\n")
       self.save(r)
 #V

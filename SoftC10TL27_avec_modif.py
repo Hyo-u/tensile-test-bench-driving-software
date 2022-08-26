@@ -5,7 +5,7 @@
 import os
 from os import path
 from json import *
-import pandas as pd
+import pandas
 
 ### Interface graphique
 from tkinter import *
@@ -44,7 +44,7 @@ import sys
 import random
 
 ### Potentiellement à virer. À vérifer
-# import xlsxwriter
+import xlsxwriter
 
 
 # Coefficients de changement d'unité
@@ -91,14 +91,13 @@ def lecture_donnee(file_name):
 SEPARATEUR = "\\" # "\\" for windows, "/" for linux
 DOSSIER_CONFIG_ET_CONSIGNES = lecture_donnee("dossier_config_et_consignes.txt") + SEPARATEUR
 DOSSIER_ENREGISTREMENTS = lecture_donnee("dossier_enregistrements.txt") + SEPARATEUR
-
+print (DOSSIER_ENREGISTREMENTS)
 
 liste_des_blocs_crappy_utilises = []  
 launch_crappy_event = Event()
-launch_crappy_confirm = True
 start_generator = False
-stop_crappy_event = Event()
-test_effectue = False
+# stop_crappy_event = Event()
+enregistrement_effectue = False
 charge_max = -10
 position_min = 2000
 position_max = -10
@@ -316,17 +315,27 @@ def _card_to_pid_and_generator(dic):
    #    stop_crappy()
    return dic
 
-def _gen_to_graph_in_tons(dic):
+def _gen_to_graph_charge(dic):
    if "consigne" not in dic.keys() :
       dic["t(s)"] = time.time()
       dic ["Consigne(transformée)"] = 0.0
       return dic
-   dic["Consigne(T)"] = 2 * dic["consigne"]
+   dic["Consigne (T)"] = COEF_VOLTS_TO_TONS * dic["consigne"]
+    #TODO : fonction inverse de l'étalonnage
+   return dic
+
+def _gen_to_graph_position(dic):
+   if "consigne" not in dic.keys() :
+      dic["t(s)"] = time.time()
+      dic ["Consigne(transformée)"] = 0.0
+      return dic
+   dic["Consigne (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic["consigne"]
     #TODO : fonction inverse de l'étalonnage
    return dic
 
 def _card_to_recorder_and_graph(dic) :
    dic = _card_to_pid_and_generator(dic)
+   dic["Temps (s)"] = dic["t(s)"]
    dic["Charge (T)"] = 2 * dic[LABEL_SORTIE_EN_CHARGE]
    dic["Position (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic[LABEL_SORTIE_EN_POSITION]
    return dic
@@ -346,9 +355,14 @@ def _pid_to_card_decharge(dic) :
    dic["entree_decharge"] *= -1
    return dic
 
-def _gen_to_dashboard(dic) :
+def _gen_to_dashboard_charge(dic) :
    dic["Temps (s)"] = dic["t(s)"]
-   dic["Consigne (T)"] = 2 * dic["consigne"]
+   dic["Consigne (T)"] = COEF_VOLTS_TO_TONS * dic["consigne"]
+   return dic
+
+def _gen_to_dashboard_position(dic) :
+   dic["Temps (s)"] = dic["t(s)"]
+   dic["Consigne (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic["consigne"]
    return dic
 
 def _card_to_dashboard(dic) :
@@ -363,10 +377,10 @@ def _card_to_dashboard(dic) :
    dic["Position max (mm)"] = position_max
    if sortie_position_en_mm < position_min :
       position_min = sortie_position_en_mm
-   dic["Position max (mm)"] = position_min
+   dic["Position min (mm)"] = position_min
    return dic
-### Reste
 
+### Fonctions de démarrage de Crappy
 def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistrement = None,
                               parametres_du_test = [], labels_a_enregistrer = None):
    """TODO"""
@@ -416,15 +430,18 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
-   graphe = customblocks.EmbeddedGrapher(("t(s)", "Consigne(T)"), 
-                                          ("t(s)", "Charge (T)"),
+   graphe = customblocks.EmbeddedGrapher(("Temps (s)", "Consigne (T)"), 
+                                         ("Temps (s)", "Charge (T)"),
+                                         ("Temps (s)", "Position (mm)"),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
 
-   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "Temps (s)", "Consigne (T)", "Position (mm)", "Charge (T)", "Charge max (T)", "Position min (mm)", "Position max (mm)"],
+   pancarte = crappy.blocks.Dashboard(labels = ["Temps (s)", "Consigne (T)", "Position (mm)", 
+                                                "Charge (T)", "Charge max (T)", 
+                                                "Position min (mm)", "Position max (mm)"],
                                        freq = 5)
    liste_des_blocs_crappy_utilises.append(pancarte)
 
@@ -437,8 +454,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    gen = crappy.blocks.Generator(path = consignes_generateur,
                                  cmd_label = 'consigne',
                                  spam = True,
-                                 freq = 50,
-                                 blocks_list = liste_des_blocs_crappy_utilises)
+                                 freq = 50)
    liste_des_blocs_crappy_utilises.append(gen)
 
    crappy.link(gen, y_charge)
@@ -451,7 +467,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, gen, modifier=_card_to_pid_and_generator)
 
-   crappy.link(gen, y_record, modifier = _gen_to_graph_in_tons)
+   crappy.link(gen, y_record, modifier = _gen_to_graph_charge)
    crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph) 
@@ -461,8 +477,8 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    if fichier_d_enregistrement is not None :
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
-   crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
-   crappy.link(gen, pancarte, modifier = _gen_to_dashboard)
+   crappy.link(gen, graphe, modifier=_gen_to_graph_charge)
+   crappy.link(gen, pancarte, modifier = _gen_to_dashboard_charge)
    crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
 
    crappy.start()
@@ -517,16 +533,18 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
-   graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
-                                          ("t(s)", LABEL_SORTIE_EN_CHARGE),
-                                          ("t(s)", LABEL_SORTIE_EN_POSITION),
+   graphe = customblocks.EmbeddedGrapher(("Temps (s)", "consigne"), 
+                                         ("Temps (s)", "Charge (T)"),
+                                         ("Temps (s)", "Position (mm)"),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
 
-   pancarte = crappy.blocks.Dashboard(labels = ["t(s)", "Temps (s)", "Consigne (T)", "Position (mm)", "Charge (T)", "Charge max (T)", "Position min (mm)", "Position max (mm)"],
+   pancarte = crappy.blocks.Dashboard(labels = ["Temps (s)", "Consigne (mm)", "Position (mm)", 
+                                                "Charge (T)", "Charge max (T)", 
+                                                "Position min (mm)", "Position max (mm)"],
                                        freq = 5)
    liste_des_blocs_crappy_utilises.append(pancarte)
 
@@ -539,8 +557,7 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    gen = crappy.blocks.Generator(path = consignes_generateur,
                                  cmd_label = 'consigne',
                                  spam = True,
-                                 freq = 50,
-                                 trig_link = 0)
+                                 freq = 50)
    liste_des_blocs_crappy_utilises.append(gen)
 
    crappy.link(gen, y_charge)
@@ -553,6 +570,7 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, gen, modifier=_card_to_pid_and_generator)
 
+   crappy.link(gen, y_record, modifier = _gen_to_graph_position)
    crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph)
@@ -562,12 +580,13 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    if fichier_d_enregistrement is not None :
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
-   crappy.link(gen, graphe, modifier=_gen_to_graph_in_tons)
-   crappy.link(gen, pancarte, modifier = _gen_to_dashboard)
+   crappy.link(gen, graphe, modifier=_gen_to_graph_position)
+   crappy.link(gen, pancarte, modifier = _gen_to_dashboard_position)
    crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
 
    crappy.start()
    crappy.reset()
+
 
 def carte_to_gen(dic):
    dic[LABEL_SORTIE_EN_POSITION] = 2 * dic["F(N)"] / 9.807 / 1000
@@ -637,8 +656,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
    gen = crappy.blocks.Generator(path = consignes_generateur,
                                  cmd_label = 'consigne',
                                  spam = True,
-                                 freq = 50,
-                                 trig_link = 0)
+                                 freq = 50)
    liste_des_blocs_crappy_utilises.append(gen)
    
    crappy.link(gen, y_charge)
@@ -656,53 +674,11 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
 
    crappy.start()
    crappy.reset()
-   return
 
-def stop_crappy():
-   """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
-   
-   EN : Stops Crappy and resets the valves' distributors."""
-   print("_______________\n" + str(liste_des_blocs_crappy_utilises) + "\n_____________")
-   while len(liste_des_blocs_crappy_utilises) > 0 :
-      bloc_a_supprimer = liste_des_blocs_crappy_utilises.pop()
-      bloc_a_supprimer.stop()
-      try :
-         crappy.blocks.Block.instances.remove(bloc_a_supprimer)
-      except KeyError:
-         pass
-   crappy.stop()
-   crappy.reset()
-   
-   if not fake_test  and __name__ == "__main__":
-      gen = crappy.blocks.Generator(path=[{'type': 'constant',
-                                          'value': 0,
-                                          'condition': "delay=0.01"}],
-                                    cmd_label='commande_en_charge',
-                                    spam=True)
-
-      carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
-                                       labels=["t(s)", "sortie_charge_brute", "sortie_position_brute"],
-                                       cmd_labels=["commande_en_charge", "commande_en_charge"],
-                                       initial_cmd=[0.0, 0.0],
-                                       exit_values=[0.0, 0.0],
-                                       channels=[{'name': 'Dev2/ao0'},
-                                                {'name': 'Dev2/ao1'},
-                                                {'name': 'Dev2/ai6'},
-                                                {'name': 'Dev2/ai7'}])
-
-      crappy.link(gen, carte_NI)
-      Thread(target = crappy.start).start()
-      time.sleep(3)
-      carte_NI.stop()
-      gen.stop()
-      crappy.stop()
-      crappy.reset()
-   if __name__ == "__main__" :
-      print("--------------debug------------------")
-
-def turn_on_generator():
-   global start_generator
-   start_generator = True
+# def turn_on_generator():
+#    global start_generator
+#    start_generator = True
+#    print(start_generator)
 
 def transformation_capteur_de_position(x):
 #TODO : constantes WTF
@@ -884,7 +860,7 @@ def demarrage_du_programme() :
          EN : Verifies the password."""
          global verrou_production
          verrou_production = OFF
-         if mot_de_passe.get()==lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + 'mdp_liste.txt') :
+         if mot_de_passe.get() == lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + 'mdp_liste.txt') :
             fenetre1.destroy()
             return fonction_principale()
          else :
@@ -893,7 +869,9 @@ def demarrage_du_programme() :
       mot_de_passe = StringVar() 
       fenetre_mdp=Toplevel(fenetre1)
       Label(fenetre_mdp, text = 'mot de passe').grid(row=0, column=0, padx =20, pady =10)
-      Entry(fenetre_mdp,textvariable=mot_de_passe,show='*', width=30).grid(row=0, column=1, padx =20, pady =10)
+      entree_mot_de_passe = Entry(fenetre_mdp,textvariable=mot_de_passe,show='*', width=30)
+      entree_mot_de_passe.grid(row=0, column=1, padx =20, pady =10)
+      entree_mot_de_passe.focus_force()
       Button(fenetre_mdp,text="Valider",command=verification_mot_de_passe).grid(row=1, column=1,padx =0, pady =10)
       Button(fenetre_mdp,text='Quitter', command=fenetre_mdp.destroy).grid(row=1, column=0,padx =0, pady =10)
    #PV   facultatif
@@ -1148,7 +1126,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       EN : Restarts the main function and brings back the user to the conditions
        entries window."""
       choix_des_documents_a_enregistrer.set(0) # Ne pas conserver les documents actuels
-      enregistrer_fct()
+      if not sauvegarde_effectue :
+         enregistrement_des_documents_choisis()
       fenetre_principale.destroy()
    #V
    def enregistrer_et_quitter():
@@ -1160,7 +1139,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          
          EN : Saves and quits."""
          choix_des_documents_a_enregistrer.set(check_val_brutes.get() + check_val_reelles.get())
-         enregistrer_fct()
+         if not sauvegarde_effectue :
+            enregistrement_des_documents_choisis()
          exit()
       #V
       def relancer_un_essai():
@@ -1169,13 +1149,13 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          
          EN : Saves and brings back the user to the test conditions' entries window."""
          choix_des_documents_a_enregistrer.set(check_val_brutes.get() + check_val_reelles.get())
-         enregistrer_fct()
+         if not sauvegarde_effectue :
+            enregistrement_des_documents_choisis()
          fenetre_de_sortie_du_programme.destroy()
          fenetre_principale.destroy()
-         global launch_crappy_confirm
-         launch_crappy_confirm = False
+         nonlocal test_effectue
+         test_effectue = False
          launch_crappy_event.set()
-         stop_crappy()
       #V
       fenetre_de_sortie_du_programme = Toplevel(fenetre_principale)
       fenetre_de_sortie_du_programme.lift()
@@ -1196,7 +1176,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       """FR : Fenêtre de choix des documents à conserver.
       
       EN : Files to keep choice window."""
-      def annulation() :
+      def annulation():
          """FR : Restore le choix précédent et ferme cette fenêtre.
          
          EN : Sets back the previous choice and closes this window."""
@@ -1215,83 +1195,132 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          Radiobutton(fenetre_de_choix_des_doc_a_conserver, text="valeurs affichées et étalonnées (fichier excel et csv)", variable=choix_des_documents_a_enregistrer, value=3).grid(row=4,column=1,padx =10, pady =10)
       Button(fenetre_de_choix_des_doc_a_conserver,text='Retour', command=annulation).grid(row=5,column=0,padx =10, pady =10)
       Button(fenetre_de_choix_des_doc_a_conserver,text='Suivant', command=fenetre_de_choix_des_doc_a_conserver.destroy).grid(row=5,column=2,padx =10, pady =10)
+      fenetre_de_choix_des_doc_a_conserver.wait_window()
    #V
-   def enregistrer_fct():
+   def enregistrement_des_documents_choisis():
    ###fenêtre d'enregistrement des valeurs. Créé les courbes, ferme les documents csv et excel, détruit les documents non voulu.
       #TODO : Maintenant qu'on a un nom, faudrait ptet le remplir. Je vais essayer de voir si y a 
       #       d'exporter le .csv en .xlsx, puis de rajouter les courbes.
-      if test_effectue :
-         # créer le doc excel
-         pass
-      else :
-         choix_des_documents_a_enregistrer.set(0)
-      match choix_des_documents_a_enregistrer.get() :
-         case 1:
-            pass
-         case 2 :
-            pass
-         case 3 :
-            pass
-      if False : # Juste pour pouvoir collapse la fonction. Mettre en commentaire empêche de collapse.
-         chart= workbook.add_chart({'type': 'scatter','subtype' : 'straight'})
-         colonne1="".join(['=Sheet1!','$D$','2',':','$D$',str(compteur_pointeur.get())])
-         colonne2="".join(['=Sheet1!','$E$','2',':','$E$',str(compteur_pointeur.get())])
-         colonne3="".join(['=Sheet1!','$F$','2',':','$F$',str(compteur_pointeur.get())])
-         colonne4="".join(['=Sheet1!','$G$','2',':','$G$',str(compteur_pointeur.get())])
-         
-         chart.add_series({
-         'name': 'valeur charge (tonnes)',
-         'categories': colonne1,
-         'values': colonne2,
-         'line':   {'width': 0.5},
-         })
-         if mode_manuel.get()=='off':
-            chart.add_series({
-            'name': 'consigne (tonnes)',
-            'categories': colonne1,
-            'values': colonne4,
-            'line':   {'width': 0.5},
-            })
-         chart.add_series({
-         'name': 'valeur déplacement (mm)',
-         'categories': colonne1,
-         'values': colonne3,
-         'line':   {'width': 0.5},
-         'y2_axis': 1,
-         })
-         chart.set_x_axis({
-         'date_axis':  True,
-         'num_format': 'hh:mm:ss',
-         'name': 'temps en hh:mm:ss'
-         })
-         chart.set_title ({'name': 'Résultat'})
-         chart.set_y_axis({'name': 'charge (tonnes)'})
-         chart.set_y2_axis({'name': 'déplacement (mm)'})
-         
-         feuille.write(7,1,commentaires_de_l_utilisateur.get())
-         chartsheet.set_chart(chart)
-         chartsheet.activate()
-         
-         workbook.close()
+      # stop_crappy()
+      if enregistrement_effectue :
          match choix_des_documents_a_enregistrer.get() :
             case 0 :
-               suppression_d_un_fichier(nom)
-               suppression_d_un_fichier(nom_csv)
-               suppression_d_un_fichier(nom_csv2)
-               suppression_d_un_fichier(nom_csv3)
-            case 1 :
-               suppression_d_un_fichier(nom_csv2)
-               suppression_d_un_fichier(nom_csv3)
+               suppression_d_un_fichier(nom_du_fichier_csv)
+            case 1:
+               donnees_du_test = pandas.read_csv(nom_du_fichier_csv, encoding = "latin-1", index_col = False)
+               if test_effectue :
+                  donnees_du_test.drop(columns = [donnees_du_test.columns[2], donnees_du_test.columns[4]], inplace = True)
+               else :
+                  donnees_du_test.drop(columns = [donnees_du_test.columns[1], donnees_du_test.columns[3]], inplace = True)
+               donnees_du_test.to_csv(nom_du_fichier_csv, index = False, header = False)
             case 2 :
-               suppression_d_un_fichier(nom_csv)
-               suppression_d_un_fichier(nom_csv2)
+               donnees_du_test = pandas.read_csv(nom_du_fichier_csv, encoding = "latin-1", index_col = False)
+               if test_effectue :
+                  donnees_du_test.drop(columns = [donnees_du_test.columns[3], donnees_du_test.columns[5]], inplace = True)
+               else :
+                  donnees_du_test.drop(columns = [donnees_du_test.columns[2], donnees_du_test.columns[4]], inplace = True)
+               donnees_du_test.to_csv(nom_du_fichier_csv, index = False, header = False)
             case 3 :
-               suppression_d_un_fichier(nom_csv)
-               suppression_d_un_fichier(nom_csv3)
+               donnees_du_test = pandas.read_csv(nom_du_fichier_csv, encoding = "latin-1", index_col = False)
+         if choix_des_documents_a_enregistrer.get() != 0 :
+            scribe = pandas.ExcelWriter(nom_du_fichier_xlsx, engine='xlsxwriter')
+            donnees_du_test.to_excel(scribe, index = False, header = False)
+            workbook = scribe.book
+            worksheet = scribe.sheets["Sheet1"]
+            chartsheet = workbook.add_chartsheet()
+            premieres_valeurs = len(parametres)
+            dernieres_valeurs = len(donnees_du_test.index)
+            chart = workbook.add_chart({'type': 'scatter','subtype' : 'straight'})
+            if test_effectue :
+               match choix_des_documents_a_enregistrer.get() :
+                  case 1 | 2 :
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs) # Temps
+                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs) # Consigne
+                     colonne3 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs) # Charge
+                     colonne4 = "=Sheet1!$D$" + str(premieres_valeurs) + ":$D$" + str(dernieres_valeurs) # Position
+                  
+                     # chart.add_series({
+                     # 'name': 'Charge (T)',
+                     # 'categories': ["Sheet1", premieres_valeurs, 0, dernieres_valeurs, 0],
+                     # 'values': ["Sheet1", premieres_valeurs, 2, dernieres_valeurs, 2],
+                     # 'line':   {'width': 0.5},
+                     # })
+                  case 3 :
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs) # Temps
+                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs) # Consigne
+                     colonne3 = "=Sheet1!$D$" + str(premieres_valeurs) + ":$D$" + str(dernieres_valeurs) # Charge
+                     colonne4 = "=Sheet1!$F$" + str(premieres_valeurs) + ":$F$" + str(dernieres_valeurs) # Position
+               # if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
+               #    chart.add_series({
+               #    'name': 'Consigne (T)',
+               #    'categories': colonne1,
+               #    'values': colonne2,
+               #    'line':   {'width': 0.5},
+               #    })
+               # else :
+               #    chart.add_series({
+               #    'name': 'Consigne (mm)',
+               #    'categories': colonne1,
+               #    'values': colonne2,
+               #    'line':   {'width': 0.5},
+               #    })
+               chart.add_series({
+               'name': 'Charge (T)',
+               'categories': colonne1,
+               'values': colonne3,
+               'line':   {'width': 0.5},
+               })
+               chart.add_series({
+               'name': 'Position (mm)',
+               'categories': colonne1,
+               'values': colonne4,
+               'line':   {'width': 0.5},
+               'y2_axis': 1,
+               })
+            else :
+               match choix_des_documents_a_enregistrer.get() :
+                  case 1, 2 :
+                     print("=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs))
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs)
+                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs)
+                     colonne3 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs)
+                  case 3 :
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs)
+                     colonne2 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs)
+                     colonne3 = "=Sheet1!$E$" + str(premieres_valeurs) + ":$E$" + str(dernieres_valeurs)
+               chart.add_series({
+               'name': 'Charge (T)',
+               'categories': colonne1,
+               'values': colonne2,
+               'line':   {'width': 0.5},
+               })
+               chart.add_series({
+               'name': 'Position (mm)',
+               'categories': colonne1,
+               'values': colonne3,
+               'line':   {'width': 0.5},
+               'y2_axis': 1,
+               })
 
-   def creation_de_certificat ():
+            chart.set_x_axis({
+            'date_axis':  True,
+            'num_format': '0.00',
+            'name': 'Temps (s)'
+            })
+            chart.set_title ({'name': 'Résultat'})
+            chart.set_y_axis({'name': 'charge (tonnes)'})
+            chart.set_y2_axis({'name': 'déplacement (mm)'})
+            
+            # worksheet.insert_chart(1, 3, chart)
+            chartsheet.set_chart(chart)
+            chartsheet.activate()
+            
+            # workbook.close()
+            scribe.close()
+
+   def creation_de_certificat():
       ##fenêtre de choix du certificat créé
-      def entrees_du_certificat ():
+      def entrees_du_certificat():
       ########################
          match type_de_certificat.get() :
             case 1 :
@@ -1307,7 +1336,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             ###fonction de création du pdf
             if askyesno("Attention","Il faut enregistrer l'essai avant de créer le certificat. Continuer ?") :
                choix_des_documents_a_conserver()
-               enregistrer_fct()
+               enregistrement_des_documents_choisis()
+               nonlocal sauvegarde_effectue
+               sauvegarde_effectue = True
 
                today=datetime.datetime.now()
                an=str(today.year)[2:]
@@ -1453,13 +1484,15 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             
          def generate_image(nom_image):
             ###fonction de génération du fichier png comprenant la courbe excel du test.
+            nonlocal nom_du_fichier_xlsx
             excel = Dispatch("Excel.Application")
             excel.ActiveWorkbook
             xlsWB = excel.Workbooks.Open(nom_du_fichier_xlsx) 
             xlsWB.Sheets("sheet1")
             mychart = excel.Charts(1)
             mychart.Export(Filename = nom_image)
-            
+
+         fenetre_de_choix_du_type_de_certificat.destroy() 
          fenetre_des_entrees_du_certificat=Toplevel(fenetre_principale)
 
          Label(fenetre_des_entrees_du_certificat, text="Destinataire du certificat").grid(row=0,column=0,columnspan=5,padx =10, pady =10)
@@ -1524,7 +1557,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
  #TODO : Gérer les différents PID et leur réglage. 
  #       Voir sensi_page() et reglage_des_coef_des_PID() dans les fonctions jetées.
 
-   def modif_etalonnage_fct():
+   def modification_des_coeff_d_etalonnage():
       ###fenêtre de modification du mot de passe
       def modif_etalonnage_suite():
          ecriture_donnee('etal_a.txt', etal_a_val.get())
@@ -2512,32 +2545,18 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       fenetre_de_choix_des_consignes.mainloop()
    #V
    def crappy_launcher():
-      parametres = []
-      parametres.append("Titre, " + entrees[0])
-      parametres.append("Date, " + str(datetime.datetime.today()))
-      parametres.append("Nom, " + entrees[1])
-      parametres.append("Materiau, " + entrees[2])
-      parametres.append("Charge de rupture, " + str(entrees[4]))
-      parametres.append("Longueur de l'éprouvette, " + str(entrees[9]))
-      parametres.append("Capteur de déplacement, Détecteur ultrasonique")
-      parametres.append("  référence, UC_2000_L2_U_V15")
-      parametres.append("Capteur de charge, Indicateur pour signal analogique")
-      parametres.append("  référence, INDI_PAXS")
-      if entrees[6] == 1 :
-         parametres.append("Méthode d'accroche, Goupilles")
-      else :
-         parametres.append("Méthode d'accroche, Cabestan " + str(str(entrees[8])) + "mm")
-      if entrees[10]:
-         pass # rajouter des trucs pour ISO-2307
-      parametres.append('')
-      labels_voulus = ["t(s)", "Consigne(T)", "sortie_charge_brute", LABEL_SORTIE_EN_CHARGE, "Charge (T)", "sortie_position_brute", LABEL_SORTIE_EN_POSITION, "Position (mm)"]
+      """TODO"""
+      # C'est ici qu'on peut changer les colonnes que l'on veut avoir dans le csv (et le xlsx).
+      nonlocal parametres
       launch_crappy_event.wait()
       launch_crappy_event.clear()
-      if launch_crappy_confirm :
+      if test_effectue :
+         global enregistrement_effectue
+         enregistrement_effectue = True
          if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
-            #TODO : demarrage_de_crappy_charge
+            labels_voulus = ["Temps (s)", "Consigne (T)", "sortie_charge_brute", "Charge (T)", "sortie_position_brute", "Position (mm)"]
             demarrage_de_crappy_charge(consignes_generateur = consignes_du_generateur, 
-                           fichier_d_enregistrement = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
+                           fichier_d_enregistrement = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                               #TODO : add lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt")
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
@@ -2545,48 +2564,160 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             #TODO : demarrage_de_crappy_deplacement
             global fake_test
             fake_test = True
+            labels_voulus = ["Temps (s)", "Consigne (mm)", "sortie_charge_brute", "Charge (T)", "sortie_position_brute", "Position (mm)"]
             demarrage_de_crappy_fake_machine(consignes_generateur = consignes_du_generateur, 
-                           fichier_d_enregistrement = str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
+                           fichier_d_enregistrement = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                               #TODO : add lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt")
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
-      global test_effectue
-      test_effectue = True
       return
 
-   def crappy_stopper():
-      stop_crappy_event.wait()
-      stop_crappy_event.clear()
-      stop_crappy()
+   # def crappy_stopper():
+   #    stop_crappy_event.wait()
+   #    stop_crappy_event.clear()
+   #    stop_crappy()
 
    def start_crappy():
       """FR : Lance Crappy et empêche de le relancer dans le même test.
       
       EN : Launches Crappy and disables launching it again in the same test."""
-      desactiver_bouton(bouton_de_demarrage_de_crappy)
-      activer_bouton(bouton_de_demarrage_du_generateur)
-      activer_bouton(pause_btn)
+      desactiver_bouton(bouton_de_demarrage_du_test)
+      desactiver_bouton(bouton_de_lancement_de_l_enregistrement)
+      desactiver_bouton(bouton_de_mise_en_tension_lente)
+      desactiver_bouton(bouton_de_mise_en_tension_rapide)
+      desactiver_bouton(bouton_de_retour_en_position_initiale)
+      activer_bouton(bouton_d_arret_de_crappy)
+      # desactiver_bouton(bouton_de_retour_en_position_initiale)
+      # desactiver_bouton(bouton_de_mise_en_tension)
+      nonlocal test_effectue
+      test_effectue = True
       launch_crappy_event.set()
       time.sleep(5)
       fenetre_principale.lift()
 
+   def demarrage_de_crappy_enregistrement_manuel():
+      """TODO"""
+      nonlocal parametres
+      desactiver_bouton(bouton_de_demarrage_du_test)
+      desactiver_bouton(bouton_de_lancement_de_l_enregistrement)
+      desactiver_bouton(bouton_de_mise_en_tension_lente)
+      desactiver_bouton(bouton_de_mise_en_tension_rapide)
+      desactiver_bouton(bouton_de_retour_en_position_initiale)
+      activer_bouton(bouton_d_arret_de_crappy)
+      # desactiver_bouton(bouton_de_retour_en_position_initiale)
+      # desactiver_bouton(bouton_de_mise_en_tension)
+
+      carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
+                                       labels = ["t(s)", "sortie_charge_brute", 
+                                                "sortie_position_brute"],
+                                       channels = [{'name': 'Dev2/ai6'},
+                                                   {'name': 'Dev2/ai7'}],
+                                       spam = True,
+                                       freq = 50)
+      liste_des_blocs_crappy_utilises.append(carte_NI)
+
+      graphe = customblocks.EmbeddedGrapher(("t(s)", LABEL_SORTIE_EN_CHARGE),
+                                          ("t(s)", LABEL_SORTIE_EN_POSITION),
+                                          freq = 3)
+      liste_des_blocs_crappy_utilises.append(graphe)
+
+      y_record = crappy.blocks.Multiplex(freq = 50)
+      liste_des_blocs_crappy_utilises.append(y_record)
+
+      pancarte = crappy.blocks.Dashboard(labels = ["Temps (s)", "Position (mm)", "Charge (T)", 
+                                                   "Charge max (T)", "Position min (mm)", "Position max (mm)"],
+                                       freq = 5)
+      liste_des_blocs_crappy_utilises.append(pancarte)
+
+      record = customblocks.CustomRecorder(filename = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
+                                          labels = ["t(s)", 
+                                                    "sortie_charge_brute", 
+                                                    "Charge (T)", 
+                                                    "sortie_position_brute",
+                                                    "Position (mm)"], 
+                                          parametres_a_inscrire = parametres)
+      liste_des_blocs_crappy_utilises.append(record)
+
+
+      crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph)
+      crappy.link(y_record, record)
+      crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
+      crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
+
+      global enregistrement_effectue
+      enregistrement_effectue = True
+      Thread(target = crappy.start).start()
+
+   def stop_crappy():
+      """FR : Arrête Crappy puis remet les distributeurs des valves à 0.
+      
+      EN : Stops Crappy and resets the valves' distributors."""
+      activer_bouton(bouton_de_mise_en_tension_lente)
+      activer_bouton(bouton_de_mise_en_tension_rapide)
+      activer_bouton(bouton_de_retour_en_position_initiale)
+      if not enregistrement_effectue :
+         activer_bouton(bouton_de_demarrage_du_test)
+         activer_bouton(bouton_de_lancement_de_l_enregistrement)
+      
+      # print("_______________\n" + str(liste_des_blocs_crappy_utilises) + "\n_____________")
+      while len(liste_des_blocs_crappy_utilises) > 0 :
+         bloc_a_supprimer = liste_des_blocs_crappy_utilises.pop()
+         bloc_a_supprimer.stop()
+         try :
+            crappy.blocks.Block.instances.remove(bloc_a_supprimer)
+         except KeyError:
+            pass
+      crappy.stop()
+      crappy.reset()
+      # TODO : remove "and enregistrement_effectue". Used only for debug purposes.
+      if not fake_test and enregistrement_effectue and __name__ == "__main__":
+         gen = crappy.blocks.Generator(path=[{'type': 'constant',
+                                             'value': 0,
+                                             'condition': "delay=0.01"}],
+                                       cmd_label='commande_en_charge',
+                                       spam=True)
+
+         carte_NI = crappy.blocks.IOBlock(name="Nidaqmx",
+                                          cmd_labels=["commande_en_charge", "commande_en_charge"],
+                                          initial_cmd=[0.0, 0.0],
+                                          exit_values=[0.0, 0.0],
+                                          channels=[{'name': 'Dev2/ao0'},
+                                                   {'name': 'Dev2/ao1'},
+                                                   {'name': 'Dev2/ai6'},
+                                                   {'name': 'Dev2/ai7'}])
+
+         crappy.link(gen, carte_NI)
+         Thread(target = crappy.start).start()
+         time.sleep(3)
+         carte_NI.stop()
+         gen.stop()
+         crappy.stop()
+         crappy.reset()
+
    def gros_bouton_rouge():
       """TODO"""
-      try :
-         # activer_bouton(bouton_enregistrer_et_quitter)
-         desactiver_bouton(pause_btn)
-         # activer_bouton(enregistrer_btn)
-         # activer_bouton(mise_a_0_btn)
-         # activer_bouton(mise_a_tension_btn)
-         menu1.entryconfigure(2, state=NORMAL)
+      # activer_bouton(bouton_enregistrer_et_quitter)
+      desactiver_bouton(bouton_d_arret_de_crappy)
+      # activer_bouton(enregistrer_btn)
+      # activer_bouton(mise_a_0_btn)
+      # activer_bouton(mise_a_tension_btn)
+      menu1.entryconfigure(2, state=NORMAL)
+      if enregistrement_effectue :
          menu3.entryconfigure("Certificat", state = NORMAL)
-      except TclError :
-         pass # if stopped after the main window has been destroyed
 
       stop_crappy()
 
-   def mise_en_tension():
-      
+   def retour_en_position_initiale():
+      """TODO"""
+      desactiver_bouton(bouton_de_demarrage_du_test)
+      desactiver_bouton(bouton_de_lancement_de_l_enregistrement)
+      desactiver_bouton(bouton_de_mise_en_tension_lente)
+      desactiver_bouton(bouton_de_mise_en_tension_rapide)
+      desactiver_bouton(bouton_de_retour_en_position_initiale)
+      activer_bouton(bouton_d_arret_de_crappy)
+      # desactiver_bouton(bouton_de_retour_en_position_initiale)
+      # desactiver_bouton(bouton_de_mise_en_tension)
+
       gen_mise_en_tension = crappy.blocks.Generator(
             path = [{"type": "ramp", 
                      "speed": -0.5, 
@@ -2597,6 +2728,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             cmd_label = 'consigne',
             spam = True,
             freq = 50)
+      liste_des_blocs_crappy_utilises.append(gen_mise_en_tension)
 
       carte_mise_en_tension = crappy.blocks.IOBlock(
             name = "Nidaqmx",
@@ -2612,13 +2744,91 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_mise_en_tension)
 
-   def retour_en_position_initiale():
-      pass
+      crappy.link(gen_mise_en_tension, carte_mise_en_tension)
+      crappy.link(carte_mise_en_tension, gen_mise_en_tension)
+      Thread(target = crappy.start).start()
+      
+   def mise_en_tension_rapide():
+      """TODO"""
+      desactiver_bouton(bouton_de_demarrage_du_test)
+      desactiver_bouton(bouton_de_lancement_de_l_enregistrement)
+      desactiver_bouton(bouton_de_mise_en_tension_lente)
+      desactiver_bouton(bouton_de_mise_en_tension_rapide)
+      desactiver_bouton(bouton_de_retour_en_position_initiale)
+      activer_bouton(bouton_d_arret_de_crappy)
+
+      gen_mise_en_tension = crappy.blocks.Generator(
+            path = [{"type": "ramp", 
+                     "speed": 0.5, 
+                     "condition" : LABEL_SORTIE_EN_CHARGE + ">" + str(0.2 * COEF_TONS_TO_VOLTS)},
+                     {'type': 'constant',
+                     'value': 0,
+                     'condition': "delay=0.01"}],
+            cmd_label = 'consigne',
+            spam = True,
+            freq = 50)
+      liste_des_blocs_crappy_utilises.append(gen_mise_en_tension)
+
+      carte_mise_en_tension = crappy.blocks.IOBlock(
+            name = "Nidaqmx",
+            labels = ["t(s)", "sortie_position_brute"],
+            cmd_labels = ["entree_decharge", "entree_charge"],
+            initial_cmd = [0.0, 0.0],
+            exit_values = [0.0, 0.0],
+            channels=[{'name': 'Dev2/ao0'},
+                     {'name': 'Dev2/ao1'},
+                     {'name': 'Dev2/ai6'},
+                     {'name': 'Dev2/ai7'}],
+            spam = True,
+            freq = 50)
+      liste_des_blocs_crappy_utilises.append(carte_mise_en_tension)
+
+      crappy.link(gen_mise_en_tension, carte_mise_en_tension)
+      crappy.link(carte_mise_en_tension, gen_mise_en_tension)
+      Thread(target = crappy.start).start()
+
+   def mise_en_tension_lente():
+      """TODO"""
+      desactiver_bouton(bouton_de_demarrage_du_test)
+      desactiver_bouton(bouton_de_lancement_de_l_enregistrement)
+      desactiver_bouton(bouton_de_mise_en_tension_lente)
+      desactiver_bouton(bouton_de_mise_en_tension_rapide)
+      desactiver_bouton(bouton_de_retour_en_position_initiale)
+      activer_bouton(bouton_d_arret_de_crappy)
+
+      gen_mise_en_tension = crappy.blocks.Generator(
+            path = [{"type": "ramp", 
+                     "speed": 0.1, 
+                     "condition" : LABEL_SORTIE_EN_CHARGE + ">" + str(0.03 * COEF_TONS_TO_VOLTS)},
+                     {'type': 'constant',
+                     'value': 0,
+                     'condition': "delay=0.01"}],
+            cmd_label = 'consigne',
+            spam = True,
+            freq = 50)
+      liste_des_blocs_crappy_utilises.append(gen_mise_en_tension)
+
+      carte_mise_en_tension = crappy.blocks.IOBlock(
+            name = "Nidaqmx",
+            labels = ["t(s)", "sortie_position_brute"],
+            cmd_labels = ["entree_decharge", "entree_charge"],
+            initial_cmd = [0.0, 0.0],
+            exit_values = [0.0, 0.0],
+            channels=[{'name': 'Dev2/ao0'},
+                     {'name': 'Dev2/ao1'},
+                     {'name': 'Dev2/ai6'},
+                     {'name': 'Dev2/ai7'}],
+            spam = True,
+            freq = 50)
+      liste_des_blocs_crappy_utilises.append(carte_mise_en_tension)
+
+      crappy.link(gen_mise_en_tension, carte_mise_en_tension)
+      crappy.link(carte_mise_en_tension, gen_mise_en_tension)
+      Thread(target = crappy.start).start()
 
 ##################################################################################################################################
 
    type_d_asservissement = init_type_d_asservissement # 1 : en charge ; 2 : en déplacement
-
    premieres_consignes_validees = False
    while premieres_consignes_validees == False :
       entrees = configuration_initiale(init_titre, init_nom,
@@ -2676,20 +2886,44 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          tonnage_limite = 10
 
    # pour créer le .xlsx :
-   nom_du_fichier_xlsx = lecture_donnee(DOSSIER_CONFIG_ET_CONSIGNES + "chemin_enre.txt"
-                           ) + str(datetime.datetime.now())[:11] + entrees[0] + ".xlsx"
-   if path.exists(nom_du_fichier_xlsx):
+   nom_du_fichier_csv = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv"
+   if path.exists(nom_du_fichier_csv):
       # If the file already exists, append a number to the name
-      nom_du_fichier, extension = path.splitext(nom_du_fichier_xlsx)
+      nom_du_fichier, extension = path.splitext(nom_du_fichier_csv)
       i = 1
       while path.exists(nom_du_fichier + "_%05d" % i + extension):
          i += 1
-      nom_du_fichier_xlsx = nom_du_fichier + "_%05d" % i + extension
-   # print("____")
-   # print(nom_du_fichier_xlsx, "debug xlsx")
+      nom_du_fichier_csv = nom_du_fichier + "_%05d" % i + extension
+   nom_du_fichier_xlsx = nom_du_fichier_csv[:-4] + ".xlsx"
+   print (nom_du_fichier_xlsx)
+   # Ces paramètres seront inscrit dans le csv (et le xlsx) comme premières lignes.
+   parametres = []
+   parametres.append("Titre, " + entrees[0] + ", , , , ")
+   parametres.append("Date, " + str(datetime.datetime.today()) + ", , , , ")
+   parametres.append("Nom, " + entrees[1] + ", , , , ")
+   parametres.append("Materiau, " + entrees[2] + ", , , , ")
+   parametres.append("Charge de rupture, " + str(entrees[4]) + ", , , , ")
+   parametres.append("Longueur de l'éprouvette, " + str(entrees[9]) + ", , , , ")
+   parametres.append("Capteur de déplacement, Détecteur ultrasonique, , , , ")
+   parametres.append("  référence, UC_2000_L2_U_V15, , , , ")
+   parametres.append("Capteur de charge, Indicateur pour signal analogique, , , , ")
+   parametres.append("  référence, INDI_PAXS, , , , ")
+   if entrees[6] == 1 :
+      parametres.append("Méthode d'accroche, Goupilles, , , , ")
+   else :
+      parametres.append("Méthode d'accroche, Cabestan " + str(str(entrees[8])) + "mm, , , , ")
+   if entrees[10]:
+      pass # rajouter des trucs pour ISO-2307
+   parametres.append(' , , , , , ')
    
-   Thread(target = crappy_launcher, daemon = True).start()
-   Thread(target = crappy_stopper, daemon = True).start()
+   sauvegarde_effectue = False
+   test_effectue = False  # Mis à True avant de lancer l'essai. S'il n'y a pas de test,
+                          # reste à False pour que le thread se termine avant de 
+                          # relancer un essai. 
+                          # Voir crappy_launcher() pour plus de détails. 
+   crappy_launch_thread = Thread(target = crappy_launcher, daemon = True)
+   crappy_launch_thread.start()
+   # Thread(target = crappy_stopper, daemon = True).start()
 
 
 
@@ -2707,7 +2941,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
    # Le reste trié
    choix_des_documents_a_enregistrer=IntVar()
-   choix_des_documents_a_enregistrer.set(0)
+   # choix_des_documents_a_enregistrer.set(0)
    charge_de_rupture=DoubleVar()
    charge_de_rupture.set(entrees[4])
    valeur_maximale_de_déplacement=DoubleVar() # Valeur maximale en déplacement
@@ -2761,7 +2995,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       indice_ecran +=1    # Cherche l'écran principal.
    largeur_de_l_ecran = liste_des_ecrans[indice_ecran].width
    # largeur_de_l_ecran = 1440
-   canvas=Canvas(fenetre_principale, height=int(largeur_de_l_ecran * 9/16 / 3),width = largeur_de_l_ecran / 3)
+   canvas=Canvas(fenetre_principale, height=int(largeur_de_l_ecran * 9/16 / 2),width = largeur_de_l_ecran / 3)
    canvas.grid(column=0, row=0, columnspan = 1, sticky=(N, W, E, S))
    width_scrollbar = ttk.Scrollbar(fenetre_principale, orient = HORIZONTAL, command = canvas.xview)
    width_scrollbar.grid(column=0, row=1, sticky=(W, E))
@@ -2769,11 +3003,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    canvas.configure(xscrollcommand = width_scrollbar.set)
    cadre_interne.bind('<Configure>', lambda _: canvas.configure(scrollregion = canvas.bbox("all")))
    canvas.create_window((0,0), window = cadre_interne, anchor='nw')
-   # frameID = canvas.create_window((0,0), window = cadre_interne, anchor='nw')
-   # cadre_interne['bg'] = '#FFFF00' # debug
-   # cadre_interne.grid(row = 0, column =0, sticky=(N, S, E, W))
-   # canvas.bind ("<Configure>", lambda e: canvas.itemconfigure (frameID, width = e.width, height = e.height))
-   
+
    # Quand on modifie la taille de la fenêtre, la scrollbar reste de la même taille et 
    # le reste s'agrandit.
    fenetre_principale.rowconfigure(0, weight=1)
@@ -2782,13 +3012,12 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    canvas.rowconfigure(0, weight=1)
    canvas.columnconfigure(0, weight=1)
 
-   zone_com_label=LabelFrame(cadre_interne, text = 'Commentaires')
-
-   zone_com=Entry( zone_com_label, textvariable= commentaires_de_l_utilisateur, width=25)
-   
-   bouton_de_demarrage_de_crappy=Button(cadre_interne, text = "Lancer l'enregistrement", command = start_crappy)
-   bouton_de_demarrage_du_generateur=Button(cadre_interne, text="Démarrer le test", command = turn_on_generator)
-   pause_btn=Button(cadre_interne, text='Pause', command=gros_bouton_rouge,bg='red')
+   bouton_de_demarrage_du_test=Button(cadre_interne, text = "Lancer le test", command = start_crappy)
+   bouton_de_lancement_de_l_enregistrement=Button(cadre_interne, text="Enregistrement manuel", command = demarrage_de_crappy_enregistrement_manuel)
+   bouton_de_mise_en_tension_rapide=Button(cadre_interne, text="Mise en tension rapide", command = mise_en_tension_rapide)
+   bouton_de_mise_en_tension_lente=Button(cadre_interne, text="Mise en tension lente", command = mise_en_tension_lente)
+   bouton_de_retour_en_position_initiale=Button(cadre_interne, text="Retour en position 0", command = retour_en_position_initiale)
+   bouton_d_arret_de_crappy=Button(cadre_interne, text='Pause', command=gros_bouton_rouge,bg='red')
    bouton_enregistrer_et_quitter=Button(cadre_interne, text='Quitter et enregistrer', command=enregistrer_et_quitter)
    # mise_a_0_btn=Button(cadre_interne, text=' Mise à 0 ',command=mise_a_0_fct)
    # mise_a_tension_btn=Button(cadre_interne, text=' Mise à tension ',command=mise_a_tension_fct)
@@ -2802,9 +3031,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    img3 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_retour.png") # make sure to add "/" not "\"
    # mise_a_0_btn.config(image=img3)
    img6 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_play.png") # make sure to add "/" not "\"
-   # bouton_de_demarrage_de_crappy.config(image=img6)
+   # bouton_de_demarrage_du_test.config(image=img6)
    img7 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_stop.png") # make sure to add "/" not "\"
-   pause_btn.config(image=img7)
+   bouton_d_arret_de_crappy.config(image=img7)
    img8 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "icone_tension.png") # make sure to add "/" not "\"
    # mise_a_tension_btn.config(image=img8)
    # img11 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "pree_image.png") # make sure to add "/" not "\"
@@ -2813,19 +3042,21 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    # img23 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "iso_image.png") # make sure to add "/" not "\"
    # img31 = PhotoImage(file= DOSSIER_CONFIG_ET_CONSIGNES + "fatigue_image.png") # make sure to add "/" not "\"
    
-   bouton_de_demarrage_de_crappy.grid(row=0,column=13,padx =5, pady =5)
-   bouton_de_demarrage_du_generateur.grid(row=1,column=13,padx =5, pady =5)
-   pause_btn.grid(row=0,column=14,columnspan=2,padx =5, pady =5)
-   bouton_enregistrer_et_quitter.grid(row=2,column=18,padx =5, pady =5)
+   bouton_de_demarrage_du_test.grid(row=0,column=13,padx =5, pady =5)
+   if verrou_production == OFF :
+      bouton_de_lancement_de_l_enregistrement.grid(row=1,column=13,padx =5, pady =5)
+      bouton_de_mise_en_tension_rapide.grid(row=2,column=13,padx =5, pady =5)
+      bouton_de_mise_en_tension_lente.grid(row=3,column=13,padx =5, pady =5)
+      bouton_de_retour_en_position_initiale.grid(row=4,column=13,padx =5, pady =5)
+   bouton_d_arret_de_crappy.grid(row=0,column=14,columnspan=2,padx =5, pady =5)
+   bouton_enregistrer_et_quitter.grid(row=2,column=14,padx =5, pady =5)
    # bouton_parametrage_consigne.grid(row=1,column=14,padx =5, pady =5)
-   enregistrer_btn.grid(row=1,column=15,padx =5, pady =5)
+   enregistrer_btn.grid(row=1,column=14,padx =5, pady =5)
    # mise_a_0_btn.grid(row=0,column=17,padx =5, pady =5)
    # mise_a_tension_btn.grid(row=1,column=17,padx =5, pady =5)
-   zone_com.grid(row=1 ,column=18,columnspan=3,padx =5, pady =5)
-   zone_com_label.grid(row=1 ,column=18,columnspan=3,padx =5, pady =5)
 
-   desactiver_bouton(bouton_de_demarrage_du_generateur)
-   desactiver_bouton(pause_btn)
+   # desactiver_bouton(bouton_de_lancement_de_l_enregistrement)
+   desactiver_bouton(bouton_d_arret_de_crappy)
    
    menubar = Menu(fenetre_principale)
 
@@ -2851,7 +3082,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       # menu4.add_command(label="Régler coefficients PID",command=reglage_des_coef_des_PID)
       menu4.add_command(label="Modifier les chemins d'accès",command=lambda: modification_des_chemins_d_acces(fenetre_principale))
       menu4.add_command(label="Modifier le mot de passe",command=lambda : modification_du_mot_de_passe(fenetre_principale))
-      menu4.add_command(label="Modifier étalonnage du banc",command=modif_etalonnage_fct)
+      menu4.add_command(label="Modifier étalonnage du banc",command=modification_des_coeff_d_etalonnage)
       menu4.add_command(label="Modifier les PID",command=lambda : modification_des_PID(fenetre_principale))
    menu4.add_separator()
    menu4.add_command(label="Fenêtre précédente",command=retour_aux_entrees)
@@ -2864,6 +3095,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
    # thread_de_lancement_de_crappy.join()
    launch_crappy_event.clear()
+   # crappy_launch_thread.join()
    return fonction_principale(*entrees[:10], type_d_asservissement)
 
 
