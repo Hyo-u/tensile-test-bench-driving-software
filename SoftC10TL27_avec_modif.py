@@ -301,13 +301,13 @@ def _card_to_pid_and_generator(dic):
    """FR : Étalonne la tension renvoyée par le capteur d'efforts.
    
    EN : Calibrates the voltage fed back by the effort sensor."""
-   global start_generator
-   if start_generator :
-      return {}
+   # global start_generator
+   # if start_generator :
+   #    return
    if "sortie_charge_brute" not in dic.keys() or "sortie_position_brute" not in dic.keys() :
-      dic["t(s)"] = time.time()
-      dic [LABEL_SORTIE_EN_CHARGE] = 0.0
-      dic[LABEL_SORTIE_EN_POSITION] = 0.0
+      # dic["t(s)"] = time.time()
+      dic ["sortie_charge_brute"] = 0.0
+      dic["sortie_position_brute"] = 0.0
       return dic
    x = 2 * dic["sortie_charge_brute"]
    dic[LABEL_SORTIE_EN_CHARGE] = (etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2
@@ -385,16 +385,22 @@ def _card_to_dashboard(dic) :
 def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistrement = None,
                               parametres_du_test = [], labels_a_enregistrer = None):
    """TODO"""
+   gen = crappy.blocks.Generator(path = consignes_generateur,
+                                 cmd_label = 'consigne',
+                                 spam = True,
+                                 freq = 50)
+   liste_des_blocs_crappy_utilises.append(gen)
+
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
                                     labels = ["t(s)", "sortie_charge_brute", 
                                              "sortie_position_brute"],
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
-                                    channels=[{'name': 'Dev2/ao0'},
-                                    {'name': 'Dev2/ao1'},
-                                    {'name': 'Dev2/ai6'},
-                                    {'name': 'Dev2/ai7'}],
+                                    channels=[{'name': 'Dev3/ao0'},
+                                    {'name': 'Dev3/ao1'},
+                                    {'name': 'Dev3/ai6'},
+                                    {'name': 'Dev3/ai7'}],
                                     spam=True,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
@@ -405,9 +411,9 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
+                                 input_label = LABEL_SORTIE_EN_CHARGE,
                                  target_label = 'consigne',
                                  labels = ["t(s)", 'entree_charge'],
-                                 input_label = LABEL_SORTIE_EN_CHARGE,
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
@@ -423,11 +429,11 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_decharge)
 
-   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
+   y_charge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(y_charge)
 
-   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
+   y_decharge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
@@ -439,6 +445,9 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
 
    y_record = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
+
+   y_dashboard = crappy.blocks.Multiplex(freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_dashboard)
 
    pancarte = custom_dashboard.Dashboard(labels = ["Temps (s)", "Consigne (T)", "Position (mm)", 
                                                 "Charge (T)", "Charge max (T)", 
@@ -457,12 +466,6 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                               labels = labels_a_enregistrer,
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
-
-   gen = crappy.blocks.Generator(path = consignes_generateur,
-                                 cmd_label = 'consigne',
-                                 spam = True,
-                                 freq = 50)
-   liste_des_blocs_crappy_utilises.append(gen)
 
    crappy.link(gen, y_charge)
    crappy.link(gen, y_decharge)
@@ -485,10 +488,10 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
    crappy.link(gen, graphe, modifier=_gen_to_graph_charge)
-   crappy.link(gen, pancarte, modifier = _gen_to_dashboard_charge)
-   crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
-   crappy.link(gen, affichage_secondaire, modifier = _gen_to_dashboard_charge)
-   crappy.link(carte_NI, affichage_secondaire, modifier = _card_to_dashboard)
+   crappy.link(gen, y_dashboard, modifier = _gen_to_dashboard_charge)
+   crappy.link(carte_NI, y_dashboard, modifier = _card_to_dashboard)
+   crappy.link(y_dashboard, pancarte)
+   crappy.link(y_dashboard, affichage_secondaire)
 
    crappy.start()
    crappy.reset()
@@ -496,16 +499,22 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
 def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enregistrement = None,
                         parametres_du_test = [], labels_a_enregistrer = None):
    """TODO"""
+   gen = crappy.blocks.Generator(path = consignes_generateur,
+                                 cmd_label = 'consigne',
+                                 spam = True,
+                                 freq = 50)
+   liste_des_blocs_crappy_utilises.append(gen)
+
    carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
                                     labels = ["t(s)", "sortie_charge_brute", 
                                              "sortie_position_brute"],
                                     cmd_labels = ["entree_decharge", "entree_charge"],
                                     initial_cmd = [0.0, 0.0],
                                     exit_values = [0.0, 0.0],
-                                    channels = [{'name': 'Dev2/ao0'},
-                                    {'name': 'Dev2/ao1'},
-                                    {'name': 'Dev2/ai6'},
-                                    {'name': 'Dev2/ai7'}],
+                                    channels = [{'name': 'Dev3/ao0'},
+                                    {'name': 'Dev3/ao1'},
+                                    {'name': 'Dev3/ai6'},
+                                    {'name': 'Dev3/ai7'}],
                                     spam = True,
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(carte_NI)
@@ -516,9 +525,9 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                  out_max=5,
                                  out_min=-5,
                                  i_limit=0.5,
+                                 input_label = LABEL_SORTIE_EN_POSITION,
                                  target_label = 'consigne',
                                  labels = ["t(s)", 'entree_charge'],
-                                 input_label = LABEL_SORTIE_EN_POSITION,
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
@@ -534,11 +543,11 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_decharge)
 
-   y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
+   y_charge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(y_charge)
 
-   y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
+   y_decharge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
@@ -549,6 +558,9 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    liste_des_blocs_crappy_utilises.append(graphe)
 
    y_record = crappy.blocks.Multiplex(freq = 50)
+   liste_des_blocs_crappy_utilises.append(y_record)
+
+   y_dashboard = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_record)
 
    pancarte = custom_dashboard.Dashboard(labels = ["Temps (s)", "Consigne (mm)", "Position (mm)", 
@@ -568,12 +580,6 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                               labels = labels_a_enregistrer,
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
-
-   gen = crappy.blocks.Generator(path = consignes_generateur,
-                                 cmd_label = 'consigne',
-                                 spam = True,
-                                 freq = 50)
-   liste_des_blocs_crappy_utilises.append(gen)
 
    crappy.link(gen, y_charge)
    crappy.link(gen, y_decharge)
@@ -596,13 +602,18 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
    crappy.link(gen, graphe, modifier=_gen_to_graph_position)
-   crappy.link(gen, pancarte, modifier = _gen_to_dashboard_position)
-   crappy.link(carte_NI, pancarte, modifier = _card_to_dashboard)
-   crappy.link(gen, affichage_secondaire, modifier = _gen_to_dashboard_position)
-   crappy.link(carte_NI, affichage_secondaire, modifier = _card_to_dashboard)
+   crappy.link(gen, y_dashboard, modifier = _gen_to_dashboard_position)
+   crappy.link(carte_NI, y_dashboard, modifier = _card_to_dashboard)
+   crappy.link(y_dashboard, pancarte)
+   crappy.link(y_dashboard, affichage_secondaire)
 
    crappy.start()
    crappy.reset()
+
+def gen_to_card_RaZ_et_MeT(dic):
+   dic["entree_decharge"] = -dic["consigne"] if dic["consigne"] < 0 else 0
+   dic["entree_charge"] = dic["consigne"] if dic["consigne"] > 0 else 0
+   return dic
 
 
 def carte_to_gen(dic):
@@ -2626,8 +2637,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       carte_NI = crappy.blocks.IOBlock(name = "Nidaqmx",
                                        labels = ["t(s)", "sortie_charge_brute", 
                                                 "sortie_position_brute"],
-                                       channels = [{'name': 'Dev2/ai6'},
-                                                   {'name': 'Dev2/ai7'}],
+                                       channels = [{'name': 'Dev3/ai6'},
+                                                   {'name': 'Dev3/ai7'}],
                                        spam = True,
                                        freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_NI)
@@ -2697,10 +2708,10 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                                           cmd_labels=["commande_en_charge", "commande_en_charge"],
                                           initial_cmd=[0.0, 0.0],
                                           exit_values=[0.0, 0.0],
-                                          channels=[{'name': 'Dev2/ao0'},
-                                                   {'name': 'Dev2/ao1'},
-                                                   {'name': 'Dev2/ai6'},
-                                                   {'name': 'Dev2/ai7'}])
+                                          channels=[{'name': 'Dev3/ao0'},
+                                                   {'name': 'Dev3/ao1'},
+                                                   {'name': 'Dev3/ai6'},
+                                                   {'name': 'Dev3/ai7'}])
 
          crappy.link(gen, carte_NI)
          Thread(target = crappy.start).start()
@@ -2752,16 +2763,16 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             cmd_labels = ["entree_decharge", "entree_charge"],
             initial_cmd = [0.0, 0.0],
             exit_values = [0.0, 0.0],
-            channels=[{'name': 'Dev2/ao0'},
-                     {'name': 'Dev2/ao1'},
-                     {'name': 'Dev2/ai6'},
-                     {'name': 'Dev2/ai7'}],
+            channels=[{'name': 'Dev3/ao0'},
+                     {'name': 'Dev3/ao1'},
+                     {'name': 'Dev3/ai6'},
+                     {'name': 'Dev3/ai7'}],
             spam = True,
             freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_retour_en_position_initiale)
 
-      crappy.link(gen_retour_en_position_initiale, carte_retour_en_position_initiale)
-      crappy.link(carte_retour_en_position_initiale, gen_retour_en_position_initiale)
+      crappy.link(gen_retour_en_position_initiale, carte_retour_en_position_initiale, modifier = gen_to_card_RaZ_et_MeT)
+      crappy.link(carte_retour_en_position_initiale, gen_retour_en_position_initiale, modifier = _card_to_pid_and_generator)
       Thread(target = crappy.start).start()
       
    def mise_en_tension_rapide():
@@ -2791,16 +2802,16 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             cmd_labels = ["entree_decharge", "entree_charge"],
             initial_cmd = [0.0, 0.0],
             exit_values = [0.0, 0.0],
-            channels=[{'name': 'Dev2/ao0'},
-                     {'name': 'Dev2/ao1'},
-                     {'name': 'Dev2/ai6'},
-                     {'name': 'Dev2/ai7'}],
+            channels=[{'name': 'Dev3/ao0'},
+                     {'name': 'Dev3/ao1'},
+                     {'name': 'Dev3/ai6'},
+                     {'name': 'Dev3/ai7'}],
             spam = True,
             freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_mise_en_tension_rapide)
 
-      crappy.link(gen_mise_en_tension_rapide, carte_mise_en_tension_rapide)
-      crappy.link(carte_mise_en_tension_rapide, gen_mise_en_tension_rapide)
+      crappy.link(gen_mise_en_tension_rapide, carte_mise_en_tension_rapide, modifier = gen_to_card_RaZ_et_MeT)
+      crappy.link(carte_mise_en_tension_rapide, gen_mise_en_tension_rapide, modifier = _card_to_pid_and_generator)
       Thread(target = crappy.start).start()
 
    def mise_en_tension_lente():
@@ -2830,16 +2841,16 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             cmd_labels = ["entree_decharge", "entree_charge"],
             initial_cmd = [0.0, 0.0],
             exit_values = [0.0, 0.0],
-            channels=[{'name': 'Dev2/ao0'},
-                     {'name': 'Dev2/ao1'},
-                     {'name': 'Dev2/ai6'},
-                     {'name': 'Dev2/ai7'}],
+            channels=[{'name': 'Dev3/ao0'},
+                     {'name': 'Dev3/ao1'},
+                     {'name': 'Dev3/ai6'},
+                     {'name': 'Dev3/ai7'}],
             spam = True,
             freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_mise_en_tension_lente)
 
-      crappy.link(gen_mise_en_tension_lente, carte_mise_en_tension_lente)
-      crappy.link(carte_mise_en_tension_lente, gen_mise_en_tension_lente)
+      crappy.link(gen_mise_en_tension_lente, carte_mise_en_tension_lente, modifier = gen_to_card_RaZ_et_MeT)
+      crappy.link(carte_mise_en_tension_lente, gen_mise_en_tension_lente, modifier = _card_to_pid_and_generator)
       Thread(target = crappy.start).start()
 
 ##################################################################################################################################

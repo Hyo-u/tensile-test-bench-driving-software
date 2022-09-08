@@ -17,10 +17,10 @@ if __name__ == '__main__':
                                     cmd_labels=["commande_en_charge", "commande_en_charge"],
                                     initial_cmd=[0.0, 0.0],
                                     exit_values=[0.0, 0.0],
-                                    channels=[{'name': 'Dev2/ao0'},
-                                              {'name': 'Dev2/ao1'},
-                                              {'name': 'Dev2/ai6'},
-                                              {'name': 'Dev2/ai7'}])
+                                    channels=[{'name': 'Dev3/ao0'},
+                                              {'name': 'Dev3/ao1'},
+                                              {'name': 'Dev3/ai6'},
+                                              {'name': 'Dev3/ai7'}])
 
    crappy.link(gen, carte_NI)
    crappy.start()

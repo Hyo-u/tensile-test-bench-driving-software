@@ -27,10 +27,10 @@ class YBlock(crappy.blocks.Block):
             for label in recv_dict:
                self.output[label] = recv_dict[label]
       
-      if self.output == {} :
-         self.output["sortie_charge_transformee"] = 0.0
-         self.output["consigne"] = 0.0
-         self.output["t(s)"] = 0.0
+      # if self.output == {} :
+      #    self.output["sortie_charge_transformee"] = 0.0
+      #    self.output["consigne"] = 0.0
+      #    self.output["t(s)"] = 0.0
       self.send(self.output)
 
 class EmbeddedGrapher(crappy.blocks.Block):
