@@ -238,7 +238,7 @@ class EmbeddedGrapher(crappy.blocks.Block):
 
    def finish(self) -> None:
       plt.close("all")
-      crappy.stop()
+      # crappy.stop()
       # arret_de_crappy()
 
    def _clear(self, *_, **__) -> None:

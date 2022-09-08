@@ -92,7 +92,7 @@ def lecture_donnee(file_name):
 SEPARATEUR = "\\" # "\\" for windows, "/" for linux
 DOSSIER_CONFIG_ET_CONSIGNES = lecture_donnee("dossier_config_et_consignes.txt") + SEPARATEUR
 DOSSIER_ENREGISTREMENTS = lecture_donnee("dossier_enregistrements.txt") + SEPARATEUR
-print (DOSSIER_ENREGISTREMENTS)
+# print (DOSSIER_ENREGISTREMENTS)
 
 liste_des_blocs_crappy_utilises = []  
 launch_crappy_event = Event()
@@ -102,7 +102,7 @@ enregistrement_effectue = False
 charge_max = -10
 position_min = 2000
 position_max = -10
-tonnage_limite = 20
+# tonnage_limite = 20
 
 alphabet=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
 next_available_letter=0
@@ -450,15 +450,16 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    liste_des_blocs_crappy_utilises.append(y_dashboard)
 
    pancarte = custom_dashboard.Dashboard(labels = ["Temps (s)", "Consigne (T)", "Position (mm)", 
-                                                "Charge (T)", "Charge max (T)", 
-                                                "Position min (mm)", "Position max (mm)"],
-                                       freq = 5)
+                                                   "Charge (T)", "Charge max (T)", 
+                                                   "Position min (mm)", "Position max (mm)"],
+                                         freq = 5)
    liste_des_blocs_crappy_utilises.append(pancarte)
 
    affichage_secondaire = custom_dashboard.Dashboard(labels = ["Temps (s)", "Consigne (T)", "Position (mm)", 
-                                                "Charge (T)", "Charge max (T)", 
-                                                "Position min (mm)", "Position max (mm)"],
-                                       freq = 5)
+                                                               "Charge (T)", "Charge max (T)", 
+                                                               "Position min (mm)", "Position max (mm)"],
+                                                     is_primary = False,
+                                                     freq = 5)
    liste_des_blocs_crappy_utilises.append(affichage_secondaire)
 
    if fichier_d_enregistrement is not None :
@@ -564,15 +565,16 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    liste_des_blocs_crappy_utilises.append(y_record)
 
    pancarte = custom_dashboard.Dashboard(labels = ["Temps (s)", "Consigne (mm)", "Position (mm)", 
-                                                "Charge (T)", "Charge max (T)", 
-                                                "Position min (mm)", "Position max (mm)"],
-                                       freq = 5)
+                                                   "Charge (T)", "Charge max (T)", 
+                                                   "Position min (mm)", "Position max (mm)"],
+                                         freq = 5)
    liste_des_blocs_crappy_utilises.append(pancarte)
 
    affichage_secondaire = custom_dashboard.Dashboard(labels = ["Temps (s)", "Consigne (mm)", "Position (mm)", 
-                                                "Charge (T)", "Charge max (T)", 
-                                                "Position min (mm)", "Position max (mm)"],
-                                       freq = 5)
+                                                               "Charge (T)", "Charge max (T)", 
+                                                               "Position min (mm)", "Position max (mm)"],
+                                                     is_primary = False,
+                                                     freq = 5)
    liste_des_blocs_crappy_utilises.append(affichage_secondaire)
 
    if fichier_d_enregistrement is not None :
@@ -615,7 +617,7 @@ def gen_to_card_RaZ_et_MeT(dic):
    dic["entree_charge"] = dic["consigne"] if dic["consigne"] > 0 else 0
    return dic
 
-
+### Fake_machine
 def carte_to_gen(dic):
    dic[LABEL_SORTIE_EN_POSITION] = 2 * dic["F(N)"] / 9.807 / 1000
    # if dic[LABEL_SORTIE_EN_POSITION]  > 2 :
@@ -708,6 +710,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
 #    global start_generator
 #    start_generator = True
 #    print(start_generator)
+
 
 def transformation_capteur_de_position(x):
 #TODO : constantes WTF
@@ -2310,7 +2313,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          """FR : Annule les changements et restore la lsite de consignes précédente.
          
          EN : Cancels the changes and restores the list to its former state."""
-         nonlocal consignes_du_generateur, premieres_consignes_validees
+         nonlocal consignes_du_generateur
          consignes_du_generateur = consignes_precedentes
          fenetre_de_choix_des_consignes.destroy()
       #V
@@ -2751,7 +2754,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      "condition" : LABEL_SORTIE_EN_POSITION + "<" + str(5 * COEF_MILLIMETERS_TO_VOLTS)},
                      {'type': 'constant',
                      'value': 0,
-                     'condition': "delay=0.01"}],
+                     'condition': "delay=0.1"}],
             cmd_label = 'consigne',
             spam = True,
             freq = 50)
@@ -2790,7 +2793,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      "condition" : LABEL_SORTIE_EN_CHARGE + ">" + str(0.2 * COEF_TONS_TO_VOLTS)},
                      {'type': 'constant',
                      'value': 0,
-                     'condition': "delay=0.01"}],
+                     'condition': "delay=0.1"}],
             cmd_label = 'consigne',
             spam = True,
             freq = 50)
@@ -2829,7 +2832,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      "condition" : LABEL_SORTIE_EN_CHARGE + ">" + str(0.03 * COEF_TONS_TO_VOLTS)},
                      {'type': 'constant',
                      'value': 0,
-                     'condition': "delay=0.01"}],
+                     'condition': "delay=0.1"}],
             cmd_label = 'consigne',
             spam = True,
             freq = 50)
@@ -2899,18 +2902,43 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          if type_d_asservissement != 0 :
             choix_des_consignes_du_generateur()      
 
-   global tonnage_limite
-   match entrees[3] :
-      case 1 :
-         tonnage_limite = 20
-      case 2 :
-         tonnage_limite = 16.6
-      case 3 :
-         tonnage_limite = 14
-      case 4 :
-         tonnage_limite = 12
-      case 5 :
-         tonnage_limite = 10
+   if len(consignes_du_generateur) > 0 :
+      consigne_de_fin = 0
+      match consignes_du_generateur[-1]["type"] :
+         case "ramp" | "sine" :
+            condition = consignes_du_generateur[-1]["condition"]
+            if condition is not None :
+               if "<" in condition :
+                  consigne_de_fin = condition.split("<")[1]
+               elif ">" in condition :
+                  consigne_de_fin = condition.split(">")[1]
+            consignes_du_generateur.append({"type" : "constant",
+                                          "value" : consigne_de_fin,
+                                          "condition" : None})
+         case "cyclic_ramp" :
+            condition = consignes_du_generateur[-1]["condition2"]
+            if condition is not None :
+               if "<" in condition :
+                  consigne_de_fin = condition.split("<")[1]
+               elif ">" in condition :
+                  consigne_de_fin = condition.split(">")[1]
+            consignes_du_generateur.append({"type" : "constant",
+                                          "value" : consigne_de_fin,
+                                          "condition" : None})
+   print(consignes_du_generateur)
+   
+   # global tonnage_limite
+   # match entrees[3] :
+   #    case 1 :
+   #       tonnage_limite = 20
+   #    case 2 :
+   #       tonnage_limite = 16.6
+   #    case 3 :
+   #       tonnage_limite = 14
+   #    case 4 :
+   #       tonnage_limite = 12
+   #    case 5 :
+   #       tonnage_limite = 10
 
    # pour créer le .xlsx :
    nom_du_fichier_csv = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv"

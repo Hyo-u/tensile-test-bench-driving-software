@@ -43,7 +43,7 @@ class Dashboard_window:
          self.root.withdraw()
       
       # Creating the first and second column. Second column will be updated.
-      font_size = 24 if self.is_primary else 40
+      font_size = 24 if self.is_primary else 48
       for label in self.labels:
          self.c1[label] = Label(self.root, text=label, borderwidth=15,
                                            font=("Courier bold", font_size))
