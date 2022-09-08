@@ -5,8 +5,8 @@ import crappy
 from crappy.blocks.block import Block
 from crappy.blocks import generator_path
 from crappy._global import CrappyStop
-import SoftC10TL27_avec_modif
-from threading import Event, Thread
+# import SoftC10TL27_avec_modif
+# from threading import Event, Thread
 
 NOMBRE_DE_CONSIGNES_MAXIMAL = 1000
 
