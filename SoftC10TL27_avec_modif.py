@@ -28,6 +28,7 @@ import customblocks
 import custom_generator
 import custom_pid
 import custom_dashboard
+from test_RAZ import remise_a_zero
 # import custom_multiplex
 # import custom_grapher
 # import custom_dashboard
@@ -46,6 +47,7 @@ import random
 
 ### Potentiellement à virer. À vérifer
 import xlsxwriter
+
 
 
 # Coefficients de changement d'unité
@@ -107,7 +109,6 @@ position_max = -10
 alphabet=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
 next_available_letter=0
 
-fake_test = False# debug
 
 def etalonnage_des_coefficients_de_transformation():
    """FR : Étalonne les coefficient de la fonction de passage de volts à tonnes.
@@ -305,30 +306,32 @@ def _card_to_pid_and_generator(dic):
    # if start_generator :
    #    return
    if "sortie_charge_brute" not in dic.keys() or "sortie_position_brute" not in dic.keys() :
-      # dic["t(s)"] = time.time()
+      dic["t(s)"] = time.time()
       dic ["sortie_charge_brute"] = 0.0
       dic["sortie_position_brute"] = 0.0
       return dic
    x = 2 * dic["sortie_charge_brute"]
-   dic[LABEL_SORTIE_EN_CHARGE] = (etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2
-   dic[LABEL_SORTIE_EN_POSITION] = transformation_capteur_de_position(dic["sortie_position_brute"])
+   dic[LABEL_SORTIE_EN_CHARGE] = float(etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2.0
+   dic[LABEL_SORTIE_EN_POSITION] = float(transformation_capteur_de_position(dic["sortie_position_brute"]))
    # if dic[LABEL_SORTIE_EN_CHARGE] > (20 * COEF_TONS_TO_VOLTS) and (2 * COEF_MILLIMETERS_TO_VOLTS) < dic[LABEL_SORTIE_EN_POSITION] < (1900 * COEF_MILLIMETERS_TO_VOLTS) :
    #    stop_crappy()
    return dic
 
-def _gen_to_graph_charge(dic):
+def _gen_to_graph_charge(dic = {}):
    if "consigne" not in dic.keys() :
       dic["t(s)"] = time.time()
-      dic ["Consigne(transformée)"] = 0.0
+      dic["consigne"] = 0.0
+      dic ["Consigne (T)"] = 0.0
       return dic
    dic["Consigne (T)"] = COEF_VOLTS_TO_TONS * dic["consigne"]
     #TODO : fonction inverse de l'étalonnage
    return dic
 
-def _gen_to_graph_position(dic):
+def _gen_to_graph_position(dic = {}):
    if "consigne" not in dic.keys() :
       dic["t(s)"] = time.time()
-      dic ["Consigne(transformée)"] = 0.0
+      dic["consigne"] = 0.0
+      dic ["Consigne (mm)"] = 0.0
       return dic
    dic["Consigne (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic["consigne"]
     #TODO : fonction inverse de l'étalonnage
@@ -357,12 +360,18 @@ def _pid_to_card_decharge(dic) :
    return dic
 
 def _gen_to_dashboard_charge(dic) :
-   dic["Temps (s)"] = dic["t(s)"]
+   if "consigne" not in dic.keys() :
+      dic["t(s)"] = time.time()
+      dic ["Consigne (T)"] = 0.0
+      return dic
    dic["Consigne (T)"] = COEF_VOLTS_TO_TONS * dic["consigne"]
    return dic
 
 def _gen_to_dashboard_position(dic) :
-   dic["Temps (s)"] = dic["t(s)"]
+   if "consigne" not in dic.keys() :
+      dic["t(s)"] = time.time()
+      dic ["Consigne (mm)"] = 0.0
+      return dic
    dic["Consigne (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic["consigne"]
    return dic
 
@@ -379,6 +388,12 @@ def _card_to_dashboard(dic) :
    if sortie_position_en_mm < position_min :
       position_min = sortie_position_en_mm
    dic["Position min (mm)"] = position_min
+   return dic
+
+def gen_to_multiplex(dic = None):
+   if "consigne" not in dic.keys() :
+      dic["t(s)"] = str(time.time())
+      dic["consigne"] = str(0.0)
    return dic
 
 ### Fonctions de démarrage de Crappy
@@ -429,12 +444,10 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_decharge)
 
-   y_charge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
-                                 freq = 50)
+   y_charge = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_charge)
 
-   y_decharge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_CHARGE],
-                                    freq = 50)
+   y_decharge = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
    graphe = customblocks.EmbeddedGrapher(("Temps (s)", "Consigne (T)"), 
@@ -468,8 +481,8 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
 
-   crappy.link(gen, y_charge)
-   crappy.link(gen, y_decharge)
+   crappy.link(gen, y_charge, modifier = gen_to_multiplex)
+   crappy.link(gen, y_decharge, modifier = gen_to_multiplex)
    crappy.link(carte_NI, y_charge, modifier=_card_to_pid_and_generator)
    crappy.link(carte_NI, y_decharge, modifier=_card_to_pid_and_generator)
    crappy.link(y_charge, pid_charge)
@@ -544,12 +557,16 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
                                     freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_decharge)
 
-   y_charge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
-                                 freq = 50)
+   y_charge = crappy.blocks.Multiplex(freq = 50)
+   # y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
+   #                                freq = 50)
+                                 
    liste_des_blocs_crappy_utilises.append(y_charge)
 
-   y_decharge = crappy.blocks.Multiplex(#out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
-                                    freq = 50)
+   y_decharge = crappy.blocks.Multiplex(freq = 50)
+   # y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
+   #                                freq = 50)
+                                    
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
    graphe = customblocks.EmbeddedGrapher(("Temps (s)", "consigne"), 
@@ -593,10 +610,10 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    crappy.link(pid_decharge, carte_NI, modifier=_pid_to_card_decharge)
    crappy.link(carte_NI, gen, modifier=_card_to_pid_and_generator)
 
-   crappy.link(gen, y_record, modifier = _gen_to_graph_position)
+   crappy.link(gen, y_record, modifier = _gen_to_graph_position)                       #
    crappy.link(pid_charge, y_record, modifier=_pid_to_card_charge)
    crappy.link(pid_decharge, y_record, modifier=_pid_to_card_decharge)
-   crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph)
+   crappy.link(carte_NI, y_record, modifier = _card_to_recorder_and_graph)             #
                            # [_card_to_recorder_and_graph, 
                            # crappy.modifier.Diff(label = LABEL_SORTIE_EN_POSITION, 
                            #                      out_label = "derivee_voltage")])
@@ -604,8 +621,8 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
       crappy.link(y_record, record)
    crappy.link(carte_NI, graphe, modifier=_card_to_recorder_and_graph)
    crappy.link(gen, graphe, modifier=_gen_to_graph_position)
-   crappy.link(gen, y_dashboard, modifier = _gen_to_dashboard_position)
-   crappy.link(carte_NI, y_dashboard, modifier = _card_to_dashboard)
+   crappy.link(gen, y_dashboard, modifier = _gen_to_dashboard_position)                #
+   crappy.link(carte_NI, y_dashboard, modifier = _card_to_dashboard)                   #
    crappy.link(y_dashboard, pancarte)
    crappy.link(y_dashboard, affichage_secondaire)
 
@@ -2592,9 +2609,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
          else :
-            #TODO : demarrage_de_crappy_deplacement
-            global fake_test
-            fake_test = True
             labels_voulus = ["Temps (s)", "Consigne (mm)", "sortie_charge_brute", "Charge (T)", "sortie_position_brute", "Position (mm)"]
             demarrage_de_crappy_deplacement(consignes_generateur = consignes_du_generateur, 
                            fichier_d_enregistrement = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
@@ -2700,10 +2714,11 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       crappy.stop()
       crappy.reset()
       # TODO : remove "and enregistrement_effectue". Used only for debug purposes.
-      if not fake_test and enregistrement_effectue and __name__ == "__main__":
+      if enregistrement_effectue and __name__ == "__main__":
+         # remise_a_zero()
          gen = crappy.blocks.Generator(path=[{'type': 'constant',
                                              'value': 0,
-                                             'condition': "delay=0.01"}],
+                                             'condition': "delay=1"}],
                                        cmd_label='commande_en_charge',
                                        spam=True)
 
@@ -2723,6 +2738,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          gen.stop()
          crappy.stop()
          crappy.reset()
+         return
 
    def gros_bouton_rouge():
       """TODO"""
@@ -2750,11 +2766,11 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
       gen_retour_en_position_initiale = crappy.blocks.Generator(
             path = [{"type": "ramp", 
-                     "speed": -0.5, 
+                     "speed": -0.25, 
                      "condition" : LABEL_SORTIE_EN_POSITION + "<" + str(5 * COEF_MILLIMETERS_TO_VOLTS)},
                      {'type': 'constant',
                      'value': 0,
-                     'condition': "delay=0.1"}],
+                     'condition': "delay=1"}],
             cmd_label = 'consigne',
             spam = True,
             freq = 50)
@@ -2762,7 +2778,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
       carte_retour_en_position_initiale = crappy.blocks.IOBlock(
             name = "Nidaqmx",
-            labels = ["t(s)", "sortie_position_brute"],
+            labels = ["t(s)", "sortie_charge_brute", "sortie_position_brute"],
             cmd_labels = ["entree_decharge", "entree_charge"],
             initial_cmd = [0.0, 0.0],
             exit_values = [0.0, 0.0],
@@ -2801,7 +2817,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
       carte_mise_en_tension_rapide = crappy.blocks.IOBlock(
             name = "Nidaqmx",
-            labels = ["t(s)", "sortie_position_brute"],
+            labels = ["t(s)", "sortie_charge_brute", "sortie_position_brute"],
             cmd_labels = ["entree_decharge", "entree_charge"],
             initial_cmd = [0.0, 0.0],
             exit_values = [0.0, 0.0],
@@ -2840,7 +2856,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
       carte_mise_en_tension_lente = crappy.blocks.IOBlock(
             name = "Nidaqmx",
-            labels = ["t(s)", "sortie_position_brute"],
+            labels = ["t(s)", "sortie_charge_brute", "sortie_position_brute"],
             cmd_labels = ["entree_decharge", "entree_charge"],
             initial_cmd = [0.0, 0.0],
             exit_values = [0.0, 0.0],

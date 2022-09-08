@@ -1,9 +1,7 @@
 import crappy
 
 
-if __name__ == '__main__':
-
-
+def remise_a_zero() :
    gen = crappy.blocks.Generator(path=[{'type': 'constant',
                                         'value': 0,
                                         'condition': "delay=0.01"}],
@@ -24,3 +22,6 @@ if __name__ == '__main__':
 
    crappy.link(gen, carte_NI)
    crappy.start()
+
+if __name__ == '__main__':
+   remise_a_zero()
