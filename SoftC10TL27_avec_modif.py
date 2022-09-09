@@ -673,7 +673,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
                                  freq = 50)
    liste_des_blocs_crappy_utilises.append(pid_charge)
 
-   graphe = customblocks.EmbeddedGrapher(("t(s)", "consigne"), 
+   graphe = custom_grapher.EmbeddedGrapher(("t(s)", "consigne"), 
                               ("t(s)", LABEL_SORTIE_EN_POSITION),
                               freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
@@ -685,7 +685,7 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
    liste_des_blocs_crappy_utilises.append(y_record)
 
    if fichier_d_enregistrement is not None :
-      record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
+      record = custom_recorder.CustomRecorder(filename = fichier_d_enregistrement,
                               labels = ["t(s)", 
                                  "x(mm)", 
                                  "F(N)",
@@ -2601,16 +2601,11 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                            labels_a_enregistrer = labels_voulus)
          else :
             labels_voulus = ["Temps (s)", "Consigne (mm)", "sortie_charge_brute", "Charge (T)", "sortie_position_brute", "Position (mm)"]
-            demarrage_de_crappy_deplacement(consignes_generateur = consignes_du_generateur, 
+            demarrage_de_crappy_fake_machine(consignes_generateur = consignes_du_generateur, 
                            fichier_d_enregistrement = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
       return
-
-   # def crappy_stopper():
-   #    stop_crappy_event.wait()
-   #    stop_crappy_event.clear()
-   #    stop_crappy()
 
    def start_crappy():
       """FR : Lance Crappy et empêche de le relancer dans le même test.
