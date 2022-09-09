@@ -30,9 +30,8 @@ import custom_pid
 import custom_dashboard
 from test_RAZ import remise_a_zero
 # import custom_multiplex
-# import custom_grapher
-# import custom_dashboard
-# import custom_recorder
+import custom_grapher
+import custom_recorder
 
 ### Divers
 from numpy import pi
@@ -450,7 +449,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    y_decharge = crappy.blocks.Multiplex(freq = 50)
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
-   graphe = customblocks.EmbeddedGrapher(("Temps (s)", "Consigne (T)"), 
+   graphe = custom_grapher.EmbeddedGrapher(("Temps (s)", "Consigne (T)"), 
                                          ("Temps (s)", "Charge (T)"),
                                          ("Temps (s)", "Position (mm)"),
                                           freq = 3)
@@ -476,7 +475,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
    liste_des_blocs_crappy_utilises.append(affichage_secondaire)
 
    if fichier_d_enregistrement is not None :
-      record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
+      record = custom_recorder.CustomRecorder(filename = fichier_d_enregistrement,
                               labels = labels_a_enregistrer,
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
@@ -560,16 +559,14 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    y_charge = crappy.blocks.Multiplex(freq = 50)
    # y_charge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
    #                                freq = 50)
-                                 
    liste_des_blocs_crappy_utilises.append(y_charge)
 
    y_decharge = crappy.blocks.Multiplex(freq = 50)
    # y_decharge = customblocks.YBlock(out_labels = ["t(s)", "consigne", LABEL_SORTIE_EN_POSITION],
    #                                freq = 50)
-                                    
    liste_des_blocs_crappy_utilises.append(y_decharge)
 
-   graphe = customblocks.EmbeddedGrapher(("Temps (s)", "consigne"), 
+   graphe = custom_grapher.EmbeddedGrapher(("Temps (s)", "consigne"), 
                                          ("Temps (s)", "Charge (T)"),
                                          ("Temps (s)", "Position (mm)"),
                                           freq = 3)
@@ -595,7 +592,7 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
    liste_des_blocs_crappy_utilises.append(affichage_secondaire)
 
    if fichier_d_enregistrement is not None :
-      record = customblocks.CustomRecorder(filename = fichier_d_enregistrement,
+      record = custom_recorder.CustomRecorder(filename = fichier_d_enregistrement,
                               labels = labels_a_enregistrer,
                               parametres_a_inscrire = parametres_du_test)
       liste_des_blocs_crappy_utilises.append(record)
@@ -722,12 +719,6 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
 
    crappy.start()
    crappy.reset()
-
-# def turn_on_generator():
-#    global start_generator
-#    start_generator = True
-#    print(start_generator)
-
 
 def transformation_capteur_de_position(x):
 #TODO : constantes WTF
