@@ -1263,7 +1263,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             case 3 :
                donnees_du_test = pandas.read_csv(nom_du_fichier_csv, encoding = "latin-1", index_col = False)
          if choix_des_documents_a_enregistrer.get() != 0 :
-            scribe = pandas.ExcelWriter(nom_du_fichier_xlsx, engine='xlsxwriter')
+            scribe = pandas.ExcelWriter(nom_du_fichier_xlsx, engine='xlsxwriter', engine_kwargs = {'strings_to_numbers': True})
             donnees_du_test.to_excel(scribe, index = False, header = False)
             workbook = scribe.book
             worksheet = scribe.sheets["Sheet1"]
@@ -2904,30 +2904,31 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          if type_d_asservissement != 0 :
             choix_des_consignes_du_generateur()      
 
-   if len(consignes_du_generateur) > 0 :
-      consigne_de_fin = 0
-      match consignes_du_generateur[-1]["type"] :
-         case "ramp" | "sine" :
-            condition = consignes_du_generateur[-1]["condition"]
-            if condition is not None :
-               if "<" in condition :
-                  consigne_de_fin = condition.split("<")[1]
-               elif ">" in condition :
-                  consigne_de_fin = condition.split(">")[1]
-            consignes_du_generateur.append({"type" : "constant",
-                                          "value" : consigne_de_fin,
-                                          "condition" : None})
-         case "cyclic_ramp" :
-            condition = consignes_du_generateur[-1]["condition2"]
-            if condition is not None :
-               if "<" in condition :
-                  consigne_de_fin = condition.split("<")[1]
-               elif ">" in condition :
-                  consigne_de_fin = condition.split(">")[1]
-            consignes_du_generateur.append({"type" : "constant",
-                                          "value" : consigne_de_fin,
-                                          "condition" : None})
-   print(consignes_du_generateur)
+   # Ces lignes ajoutent un palier final aux consignes
+   # if len(consignes_du_generateur) > 0 :
+   #    consigne_de_fin = 0
+   #    match consignes_du_generateur[-1]["type"] :
+   #       case "ramp" | "sine" :
+   #          condition = consignes_du_generateur[-1]["condition"]
+   #          if condition is not None :
+   #             if "<" in condition :
+   #                consigne_de_fin = condition.split("<")[1]
+   #             elif ">" in condition :
+   #                consigne_de_fin = condition.split(">")[1]
+   #          consignes_du_generateur.append({"type" : "constant",
+   #                                        "value" : consigne_de_fin,
+   #                                        "condition" : None})
+   #       case "cyclic_ramp" :
+   #          condition = consignes_du_generateur[-1]["condition2"]
+   #          if condition is not None :
+   #             if "<" in condition :
+   #                consigne_de_fin = condition.split("<")[1]
+   #             elif ">" in condition :
+   #                consigne_de_fin = condition.split(">")[1]
+   #          consignes_du_generateur.append({"type" : "constant",
+   #                                        "value" : consigne_de_fin,
+   #                                        "condition" : None})
+   # print(consignes_du_generateur)
    
    # global tonnage_limite
    # match entrees[3] :
