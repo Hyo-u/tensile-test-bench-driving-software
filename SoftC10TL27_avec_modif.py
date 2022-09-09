@@ -2601,7 +2601,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                            labels_a_enregistrer = labels_voulus)
          else :
             labels_voulus = ["Temps (s)", "Consigne (mm)", "sortie_charge_brute", "Charge (T)", "sortie_position_brute", "Position (mm)"]
-            demarrage_de_crappy_fake_machine(consignes_generateur = consignes_du_generateur, 
+            demarrage_de_crappy_deplacement(consignes_generateur = consignes_du_generateur, 
                            fichier_d_enregistrement = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                            parametres_du_test = parametres, 
                            labels_a_enregistrer = labels_voulus)
