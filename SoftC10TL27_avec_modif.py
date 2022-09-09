@@ -5,6 +5,7 @@
 import os
 from os import path
 from json import *
+from turtle import done
 import pandas
 
 ### Interface graphique
@@ -21,6 +22,10 @@ import PIL
 from reportlab.pdfgen import canvas as cvpdf
 from reportlab.lib.pagesizes import A4
 from win32com.client import Dispatch   # pip install pywin32
+import excel2img
+from openpyxl import load_workbook
+from openpyxl_image_loader import SheetImageLoader
+from PIL import ImageGrab, Image
 
 ### Imports pour CRAPPy
 import crappy
@@ -341,6 +346,7 @@ def _card_to_recorder_and_graph(dic) :
    dic["Temps (s)"] = dic["t(s)"]
    dic["Charge (T)"] = 2 * dic[LABEL_SORTIE_EN_CHARGE]
    dic["Position (mm)"] = COEF_VOLTS_TO_MILLIMETERS * dic[LABEL_SORTIE_EN_POSITION]
+   dic["Position (dm)"] = dic["Position (mm)"] /100
    return dic
 
 def _pid_to_card_charge(dic) :
@@ -451,7 +457,7 @@ def demarrage_de_crappy_charge(consignes_generateur = None, fichier_d_enregistre
 
    graphe = custom_grapher.EmbeddedGrapher(("Temps (s)", "Consigne (T)"), 
                                          ("Temps (s)", "Charge (T)"),
-                                         ("Temps (s)", "Position (mm)"),
+                                         ("Temps (s)", "Position (dm)"),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
@@ -568,7 +574,7 @@ def demarrage_de_crappy_deplacement(consignes_generateur = None, fichier_d_enreg
 
    graphe = custom_grapher.EmbeddedGrapher(("Temps (s)", "consigne"), 
                                          ("Temps (s)", "Charge (T)"),
-                                         ("Temps (s)", "Position (mm)"),
+                                         ("Temps (s)", "Position (dm)"),
                                           freq = 3)
    liste_des_blocs_crappy_utilises.append(graphe)
 
@@ -1181,6 +1187,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          choix_des_documents_a_enregistrer.set(check_val_brutes.get() + check_val_reelles.get())
          if not sauvegarde_effectue :
             enregistrement_des_documents_choisis()
+         # crappy_launch_thread._stop()
          exit()
       #V
       def relancer_un_essai():
@@ -1263,22 +1270,26 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             case 3 :
                donnees_du_test = pandas.read_csv(nom_du_fichier_csv, encoding = "latin-1", index_col = False)
          if choix_des_documents_a_enregistrer.get() != 0 :
-            scribe = pandas.ExcelWriter(nom_du_fichier_xlsx, engine='xlsxwriter', engine_kwargs = {'strings_to_numbers': True})
+            scribe = pandas.ExcelWriter(nom_du_fichier_xlsx, engine='xlsxwriter', engine_kwargs = {"options" : {'strings_to_numbers': True}})
             donnees_du_test.to_excel(scribe, index = False, header = False)
             workbook = scribe.book
             worksheet = scribe.sheets["Sheet1"]
-            chartsheet = workbook.add_chartsheet()
+            # chartsheet = workbook.add_chartsheet()
             premieres_valeurs = len(parametres)
             dernieres_valeurs = len(donnees_du_test.index)
             chart = workbook.add_chart({'type': 'scatter','subtype' : 'straight'})
             if test_effectue :
+               global charge_max
                match choix_des_documents_a_enregistrer.get() :
                   case 1 | 2 :
+                     print("-----------------------")
+                     print(donnees_du_test.iloc[premieres_valeurs + 1:dernieres_valeurs,3].max()) 
+                     print("--------------------------------------")
                      colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs) # Temps
                      colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs) # Consigne
                      colonne3 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs) # Charge
                      colonne4 = "=Sheet1!$D$" + str(premieres_valeurs) + ":$D$" + str(dernieres_valeurs) # Position
-                  
+                     charge_max = donnees_du_test.iloc[premieres_valeurs + 1:dernieres_valeurs,2].max()
                      # chart.add_series({
                      # 'name': 'Charge (T)',
                      # 'categories': ["Sheet1", premieres_valeurs, 0, dernieres_valeurs, 0],
@@ -1290,6 +1301,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs) # Consigne
                      colonne3 = "=Sheet1!$D$" + str(premieres_valeurs) + ":$D$" + str(dernieres_valeurs) # Charge
                      colonne4 = "=Sheet1!$F$" + str(premieres_valeurs) + ":$F$" + str(dernieres_valeurs) # Position
+                     charge_max = donnees_du_test.iloc[premieres_valeurs + 1:dernieres_valeurs,3].max()
                # if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
                #    chart.add_series({
                #    'name': 'Consigne (T)',
@@ -1351,9 +1363,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             chart.set_y_axis({'name': 'charge (tonnes)'})
             chart.set_y2_axis({'name': 'déplacement (mm)'})
             
-            # worksheet.insert_chart(1, 3, chart)
-            chartsheet.set_chart(chart)
-            chartsheet.activate()
+            worksheet.insert_chart("G2", chart)
+            # chartsheet.set_chart(chart)
+            # chartsheet.activate()
             
             # workbook.close()
             scribe.close()
@@ -1389,9 +1401,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                if len(jour)==1:
                   jour = '0' + jour
                date = jour + '/' + mois + '/' + an
-               generate_pdf(date,commentaires_de_l_utilisateur.get(),str(valeur_maximale_de_charge.get()),reference.get(),epreuve.get(),materiau.get(),projet.get(),nom_prenom.get(),banc.get(),commande.get(),contact3.get(),contact2.get(),contact1.get(),adresse3.get(),adresse2.get(),adresse1.get(),societe.get(),normes.get(),validite.get())
+               generate_pdf(date,commentaires_de_l_utilisateur.get(),str(charge_max[:5]),reference.get(),epreuve.get(),materiau.get(),projet.get(),nom_prenom.get(),banc.get(),commande.get(),contact3.get(),contact2.get(),contact1.get(),adresse3.get(),adresse2.get(),adresse1.get(),societe.get(),normes.get(),validite.get())
                showinfo('Bravo','Certificat créé !')
-               fenetre_de_choix_du_type_de_certificat.destroy()
+               fenetre_des_entrees_du_certificat.destroy()
                
                activer_bouton(bouton_enregistrer_et_quitter)
                desactiver_bouton(enregistrer_btn)
@@ -1404,13 +1416,13 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             """
             match type_de_certificat.get() :
                case 1 :
-                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Fatigue.pdf"
+                  nom_pdf = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Fatigue.pdf"
                case 2 :
-                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Rupture.pdf"
+                  nom_pdf = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Rupture.pdf"
                case 3 :
-                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_d_Épreuve.pdf"
+                  nom_pdf = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_d_Épreuve.pdf"
                case 4 :
-                  nom_pdf = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Préétirage.pdf"
+                  nom_pdf = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + "_Certificat_de_Préétirage.pdf"
 
             c = cvpdf.Canvas(nom_pdf, pagesize=A4)
             ###rectangles de couleur
@@ -1515,7 +1527,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             im = PIL.Image.open(DOSSIER_CONFIG_ET_CONSIGNES + 'Logo-Ino-Rope-blanc.png')
             c.drawInlineImage(im,455,775, width=90, height=14)
 
-            nom_png = DOSSIER_CONFIG_ET_CONSIGNES + str(datetime.datetime.now())[:11] + entrees[0] + ".png"
+            nom_png = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".png"
             generate_image(nom_png)
             im = PIL.Image.open(nom_png)   
             c.drawInlineImage(im,70,150, width=470, height=280)
@@ -1525,12 +1537,18 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          def generate_image(nom_image):
             ###fonction de génération du fichier png comprenant la courbe excel du test.
             nonlocal nom_du_fichier_xlsx
+            # excel2img.export_img(nom_du_fichier_xlsx, nom_image, "Chart1")
+            # print("debug end")
+
             excel = Dispatch("Excel.Application")
             excel.ActiveWorkbook
             xlsWB = excel.Workbooks.Open(nom_du_fichier_xlsx) 
-            xlsWB.Sheets("sheet1")
-            mychart = excel.Charts(1)
-            mychart.Export(Filename = nom_image)
+            worksheet = xlsWB.Sheets(1)
+            for n, shape in enumerate(worksheet.Shapes):
+               # Save shape to clipboard, then save what is in the clipboard to the file
+               shape.Copy()
+               image = ImageGrab.grabclipboard()
+               image.save(nom_image, 'PNG')
 
          fenetre_de_choix_du_type_de_certificat.destroy() 
          fenetre_des_entrees_du_certificat=Toplevel(fenetre_principale)
@@ -2302,12 +2320,12 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                   Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_en_cycles, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_temps), '%P')).grid(row = 11, column = 3, padx = 5, pady = 5)
                   Label(fenetre_de_modification_d_une_consigne, text = "cycle(s)").grid(row = 11, column = 4, padx = 5, pady = 5, sticky = 'w')
 
-            Button(fenetre_de_modification_d_une_consigne, text = "Annuler", command = fenetre_de_modification_d_une_consigne.destroy).grid(row = 100, column = 0, columnspan = 2, padx = 5, pady = 5)
-            Button(fenetre_de_modification_d_une_consigne, text = "Valider", command = ajout_ou_modification_validee).grid(row = 100, column = 2, columnspan = 3, padx = 5, pady = 5)
-            
-            fenetre_de_modification_d_une_consigne.wait_window()
-            if validation :
-               return consigne_a_changer
+         Button(fenetre_de_modification_d_une_consigne, text = "Annuler", command = fenetre_de_modification_d_une_consigne.destroy).grid(row = 100, column = 0, columnspan = 2, padx = 5, pady = 5)
+         Button(fenetre_de_modification_d_une_consigne, text = "Valider", command = ajout_ou_modification_validee).grid(row = 100, column = 2, columnspan = 3, padx = 5, pady = 5)
+         
+         fenetre_de_modification_d_une_consigne.wait_window()
+         if validation :
+            return consigne_a_changer
       #V
       def suppression_de_toutes_les_consignes():
          """FR : Supprime toutes les consignes.
@@ -2790,8 +2808,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       activer_bouton(bouton_d_arret_de_crappy)
 
       gen_mise_en_tension_rapide = crappy.blocks.Generator(
-            path = [{"type": "ramp", 
-                     "speed": 0.5, 
+            path = [{"type": "constant", 
+                     "value": 2.0,
                      "condition" : LABEL_SORTIE_EN_CHARGE + ">" + str(0.2 * COEF_TONS_TO_VOLTS)},
                      {'type': 'constant',
                      'value': 0,
@@ -2829,8 +2847,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       activer_bouton(bouton_d_arret_de_crappy)
 
       gen_mise_en_tension_lente = crappy.blocks.Generator(
-            path = [{"type": "ramp", 
-                     "speed": 0.1, 
+            path = [{"type": "constant", 
+                     "speed": 0.2, 
                      "condition" : LABEL_SORTIE_EN_CHARGE + ">" + str(0.03 * COEF_TONS_TO_VOLTS)},
                      {'type': 'constant',
                      'value': 0,
@@ -2859,7 +2877,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
       Thread(target = crappy.start).start()
 
 ##################################################################################################################################
-
+   charge_maximum = charge_max
    type_d_asservissement = init_type_d_asservissement # 1 : en charge ; 2 : en déplacement
    premieres_consignes_validees = False
    while premieres_consignes_validees == False :
@@ -2953,7 +2971,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          i += 1
       nom_du_fichier_csv = nom_du_fichier + "_%05d" % i + extension
    nom_du_fichier_xlsx = nom_du_fichier_csv[:-4] + ".xlsx"
-   print (nom_du_fichier_xlsx)
+   # print (nom_du_fichier_xlsx)
    # Ces paramètres seront inscrit dans le csv (et le xlsx) comme premières lignes.
    parametres = []
    parametres.append("Titre, " + entrees[0] + ", , , , ")
@@ -3002,12 +3020,6 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    # choix_des_documents_a_enregistrer.set(0)
    charge_de_rupture=DoubleVar()
    charge_de_rupture.set(entrees[4])
-   valeur_maximale_de_déplacement=DoubleVar() # Valeur maximale en déplacement
-   valeur_maximale_de_déplacement.set(-10000)
-   valeur_minimale_de_déplacement=DoubleVar() # Valeur minimale en déplacement
-   valeur_minimale_de_déplacement.set(2000)
-   valeur_maximale_de_charge=DoubleVar()
-   valeur_maximale_de_charge.set(-10000)
 
    # vrac
    mode_manuel=StringVar()

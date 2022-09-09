@@ -1,1 +1,1 @@
-[{"type": "ramp", "speed": 0.15, "condition": "sortie_charge_transformee>0.1"}, {"type": "constant", "value": 0.1, "condition": "delay=0.1"}, {"type": "ramp", "speed": 0.3, "condition": "sortie_charge_transformee>2.8"}, {"type": "constant", "value": 0.3, "condition": "delay=20.0"}]
+[{"type": "ramp", "speed": 0.15, "condition": "sortie_charge_transformee>2.0"}, {"type": "constant", "value": 2.0, "condition": "delay=5.0"}, {"type": "ramp", "speed": 0.3, "condition": "sortie_charge_transformee>4.0"}, {"type": "constant", "value": 4.0, "condition": "delay=20.0"}]
