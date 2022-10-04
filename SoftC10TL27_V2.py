@@ -11,7 +11,7 @@ import pandas
 ### Interface graphique
 from tkinter import *
 from tkinter import ttk
-# from tkinter import tix   # Obsolète, à remplacer
+# from tkinter import tix # Obsolète, à remplacer
 from tkinter.messagebox import *
 from tkinter.filedialog import *
 from screeninfo import get_monitors
@@ -274,7 +274,7 @@ def _check_entree_string(new_value):
    EN : Prevent the user from entering incorrect values."""
    if new_value == "" :
       return True
-   if re.match("^[-A-Za-z0-9éèêëàùôÎïÉÈÊËÀÙÔÎÏ ]*$", new_value) is None :
+   if re.match("^[-A-Za-z0-9éèêëàùôÎïÉÈÊËÀÙÔÏ_ ]*$", new_value) is None :
       return False
    return True
 #V
@@ -956,7 +956,7 @@ def demarrage_du_programme() :
 #PV  obligatoire (tix)
 def configuration_initiale (init_titre, init_nom, 
       init_materiau, init_lg_banc, init_charge_rupt, init_diam_a_vide, 
-      init_accroche, init_epissage, init_cabestan, init_lg_utile) :
+      init_accroche, init_epissage, init_cabestan, init_lg_utile, init_type_d_asservissement) :
    """FR : Fenêtre de configuration des valeurs initiales de l'essai.
    
    EN : Test's initial values configuration window."""
@@ -1066,6 +1066,7 @@ def configuration_initiale (init_titre, init_nom,
    is_test_iso = BooleanVar()
 
    choix_PID = IntVar()
+   choix_PID.set(init_type_d_asservissement)
    charge_P = DoubleVar()
    charge_I = DoubleVar()
    charge_D = DoubleVar()
@@ -1158,7 +1159,7 @@ def configuration_initiale (init_titre, init_nom,
 
    fenetre_des_entrees.mainloop()
    
-   return (titre.get(),nom.get(),materiau.get(),longueur_banc.get(),charge_de_rupture.get(),diametre_a_vide.get(),type_d_accroche.get(),est_episse.get(),diametre_du_cabestan.get(),longueur_utile.get(), is_test_iso.get(), charger_le_dernier_test.get())
+   return (titre.get(),nom.get(),materiau.get(),longueur_banc.get(),charge_de_rupture.get(),diametre_a_vide.get(),type_d_accroche.get(),est_episse.get(),diametre_du_cabestan.get(),longueur_utile.get(), is_test_iso.get(), choix_PID.get(), charger_le_dernier_test.get())
 #PV obligatoire (tix)
 def fonction_principale(init_titre='', init_nom='', init_materiau='', 
       init_lg_banc=1, init_charge_rupt=0, init_diam_a_vide=0.0, init_accroche=1, 
@@ -1253,7 +1254,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
          match choix_des_documents_a_enregistrer.get() :
             case 0 :
                suppression_d_un_fichier(nom_du_fichier_csv)
-            case 1:
+            case 1 :
                donnees_du_test = pandas.read_csv(nom_du_fichier_csv, encoding = "latin-1", index_col = False)
                if test_effectue :
                   donnees_du_test.drop(columns = [donnees_du_test.columns[2], donnees_du_test.columns[4]], inplace = True)
@@ -1276,6 +1277,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
             worksheet = scribe.sheets["Sheet1"]
             # chartsheet = workbook.add_chartsheet()
             premieres_valeurs = len(parametres)
+ #           debut_donnee_csv = premieres_valeurs + 1
             dernieres_valeurs = len(donnees_du_test.index)
             chart = workbook.add_chart({'type': 'scatter','subtype' : 'straight'})
             if test_effectue :
@@ -1285,10 +1287,10 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      print("-----------------------")
                      print(donnees_du_test.iloc[premieres_valeurs + 1:dernieres_valeurs,3].max()) 
                      print("--------------------------------------")
-                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs) # Temps
-                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs) # Consigne
-                     colonne3 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs) # Charge
-                     colonne4 = "=Sheet1!$D$" + str(premieres_valeurs) + ":$D$" + str(dernieres_valeurs) # Position
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs + 1) + ":$A$" + str(dernieres_valeurs) # Temps
+                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs + 1) + ":$B$" + str(dernieres_valeurs) # Consigne
+                     colonne3 = "=Sheet1!$C$" + str(premieres_valeurs + 1) + ":$C$" + str(dernieres_valeurs) # Charge
+                     colonne4 = "=Sheet1!$D$" + str(premieres_valeurs + 1) + ":$D$" + str(dernieres_valeurs) # Position
                      charge_max = donnees_du_test.iloc[premieres_valeurs + 1:dernieres_valeurs,2].max()
                      # chart.add_series({
                      # 'name': 'Charge (T)',
@@ -1297,10 +1299,10 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      # 'line':   {'width': 0.5},
                      # })
                   case 3 :
-                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs) # Temps
-                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs) # Consigne
-                     colonne3 = "=Sheet1!$D$" + str(premieres_valeurs) + ":$D$" + str(dernieres_valeurs) # Charge
-                     colonne4 = "=Sheet1!$F$" + str(premieres_valeurs) + ":$F$" + str(dernieres_valeurs) # Position
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs + 1) + ":$A$" + str(dernieres_valeurs) # Temps
+                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs + 1) + ":$B$" + str(dernieres_valeurs) # Consigne
+                     colonne3 = "=Sheet1!$D$" + str(premieres_valeurs + 1) + ":$D$" + str(dernieres_valeurs) # Charge
+                     colonne4 = "=Sheet1!$F$" + str(premieres_valeurs + 1) + ":$F$" + str(dernieres_valeurs) # Position
                      charge_max = donnees_du_test.iloc[premieres_valeurs + 1:dernieres_valeurs,3].max()
                # if type_d_asservissement == ASSERVISSEMENT_EN_CHARGE :
                #    chart.add_series({
@@ -1333,13 +1335,13 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                match choix_des_documents_a_enregistrer.get() :
                   case 1, 2 :
                      print("=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs))
-                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs)
-                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs) + ":$B$" + str(dernieres_valeurs)
-                     colonne3 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs)
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs + 1) + ":$A$" + str(dernieres_valeurs)
+                     colonne2 = "=Sheet1!$B$" + str(premieres_valeurs + 1) + ":$B$" + str(dernieres_valeurs)
+                     colonne3 = "=Sheet1!$C$" + str(premieres_valeurs + 1) + ":$C$" + str(dernieres_valeurs)
                   case 3 :
-                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs) + ":$A$" + str(dernieres_valeurs)
-                     colonne2 = "=Sheet1!$C$" + str(premieres_valeurs) + ":$C$" + str(dernieres_valeurs)
-                     colonne3 = "=Sheet1!$E$" + str(premieres_valeurs) + ":$E$" + str(dernieres_valeurs)
+                     colonne1 = "=Sheet1!$A$" + str(premieres_valeurs + 1) + ":$A$" + str(dernieres_valeurs)
+                     colonne2 = "=Sheet1!$C$" + str(premieres_valeurs + 1) + ":$C$" + str(dernieres_valeurs)
+                     colonne3 = "=Sheet1!$E$" + str(premieres_valeurs + 1) + ":$E$" + str(dernieres_valeurs)
                chart.add_series({
                'name': 'Charge (T)',
                'categories': colonne1,
@@ -1356,7 +1358,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
 
             chart.set_x_axis({
             'date_axis':  True,
-            'num_format': '0.00',
+            'num_format': '0', #modif de 0.00 à 0.0
             'name': 'Temps (s)'
             })
             chart.set_title ({'name': 'Résultat'})
@@ -2663,8 +2665,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                                        spam = True,
                                        freq = 50)
       liste_des_blocs_crappy_utilises.append(carte_NI)
-
-      graphe = customblocks.EmbeddedGrapher(("t(s)", LABEL_SORTIE_EN_CHARGE),
+# Previously : graphe = customblocks.EmbeddedGrapher( ne fonctionne pas
+      graphe = custom_grapher.EmbeddedGrapher(("t(s)", LABEL_SORTIE_EN_CHARGE),
                                           ("t(s)", LABEL_SORTIE_EN_POSITION),
                                           freq = 3)
       liste_des_blocs_crappy_utilises.append(graphe)
@@ -2676,8 +2678,8 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                                                    "Charge max (T)", "Position min (mm)", "Position max (mm)"],
                                        freq = 5)
       liste_des_blocs_crappy_utilises.append(pancarte)
-
-      record = customblocks.CustomRecorder(filename = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
+# Previously :  record = customblocks.CustomRecorder(
+      record = custom_recorder.CustomRecorder(filename = DOSSIER_ENREGISTREMENTS + str(datetime.datetime.now())[:11] + entrees[0] + ".csv",
                                           labels = ["t(s)", 
                                                     "sortie_charge_brute", 
                                                     "Charge (T)", 
@@ -2883,7 +2885,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
    while premieres_consignes_validees == False :
       entrees = configuration_initiale(init_titre, init_nom,
          init_materiau, init_lg_banc, init_charge_rupt, init_diam_a_vide, 
-         init_accroche, init_epissage, init_cabestan, init_lg_utile)
+         init_accroche, init_epissage, init_cabestan, init_lg_utile, init_type_d_asservissement)
       if verrou_production == RESTART:
          return demarrage_du_programme()
       if entrees[10] :
