@@ -55,9 +55,9 @@ import xlsxwriter
 
 
 # Coefficients de changement d'unité
-COEF_VOLTS_TO_MILLIMETERS = 200
+COEF_VOLTS_TO_MILLIMETERS = 250
 COEF_MILLIMETERS_TO_VOLTS = 1 / COEF_VOLTS_TO_MILLIMETERS
-COEF_VOLTS_TO_TONS = 2
+COEF_VOLTS_TO_TONS = 2 # modifier en 1 si etalonage propre
 COEF_TONS_TO_VOLTS = 1 / COEF_VOLTS_TO_TONS
 
 # Les trois constantes suivantes sont pour verrou_production
@@ -167,7 +167,7 @@ def tons_to_volts(tons) :
    """FR : Convertit des tonnes en volts.
    
    EN : Converts tons in volts."""
-   return round(tons/2, 2)
+   return round(tons/2, 4)
 #V
 ### Fonctions de vérification des entrées des utilisateurs
 def _check_entree_float(new_value):
@@ -189,7 +189,7 @@ def _check_entree_charge(new_value):
    if re.match("^[0-9]+\.?[0-9]*$", new_value) is None and re.match("^[0-9]*\.?[0-9]+$", new_value) is None :
       return False
    new_value = float(new_value)
-   return new_value >= 0.0 and new_value <= 20.0
+   return new_value >= 0.0 and new_value <= 20.0 #Yo Modif consigne/2 remttre 20 quand tout fonctionne
 #V
 def _check_entree_charge_prod(new_value):
    """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
@@ -233,7 +233,7 @@ def _check_entree_vitesse_charge(new_value):
    if re.match("^-?[0-9]+\.?[0-9]*$", new_value) is None and re.match("^-?[0-9]*\.?[0-9]+$", new_value) is None :
       return False
    new_value = float(new_value)
-   return new_value >= -20.0 and new_value <= 20.0
+   return new_value >= -20.0 and new_value <= 20.0 #Yo Modif consigne/2 remttre 20 quand tout fonctionne
 #V
 def _check_entree_vitesse_position(new_value):
    """FR : Empêche l'utilisateur d'entrer des valeurs incorrectes.
@@ -314,7 +314,7 @@ def _card_to_pid_and_generator(dic):
       dic ["sortie_charge_brute"] = 0.0
       dic["sortie_position_brute"] = 0.0
       return dic
-   x = 2 * dic["sortie_charge_brute"]
+   x = 1 * dic["sortie_charge_brute"]
    dic[LABEL_SORTIE_EN_CHARGE] = float(etalonnage_a*(x**2) + etalonnage_b * x + etalonnage_c) / 2.0
    dic[LABEL_SORTIE_EN_POSITION] = float(transformation_capteur_de_position(dic["sortie_position_brute"]))
    # if dic[LABEL_SORTIE_EN_CHARGE] > (20 * COEF_TONS_TO_VOLTS) and (2 * COEF_MILLIMETERS_TO_VOLTS) < dic[LABEL_SORTIE_EN_POSITION] < (1900 * COEF_MILLIMETERS_TO_VOLTS) :
@@ -358,7 +358,7 @@ def _pid_to_card_charge(dic) :
 
 def _pid_to_card_decharge(dic) :
    if -0.03 > dic["entree_decharge"]  :
-      dic["entree_decharge"] -= 1.11 #0.525
+      dic["entree_decharge"] -= 1.15 #before0.525, 1.11
    else :
       dic["entree_decharge"] = 0
    dic["entree_decharge"] *= -1
@@ -727,10 +727,11 @@ def demarrage_de_crappy_fake_machine(consignes_generateur = None, fichier_d_enre
    crappy.reset()
 
 def transformation_capteur_de_position(x):
-#TODO : constantes WTF
+#TODO : constantes WTF, modif nouveau capteur
    #convertion tension lue par le capteur ultrason -> tension étalonnée pour ne pas dépasser les valeurs limites en distance
-   return (x-2.18)*5/4.08 
-
+   return (7.9719-x)/(7.9719-0.1921)*1949/250
+# Capteur ultrason etalonage : return (x-2.18)*5/4.08 
+   
 def desactiver_bouton(btn):
    """FR : Désactive le bouton.
    
@@ -1769,8 +1770,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                   case "ramp" :
                      consigne_a_changer["speed"] = tons_to_volts(speed.get())
                      match type_de_condition.get() :
-                        case 0 :
-                           consigne_a_changer["condition"] = None
+                        #TODO Ne fonctionne pas, mettre une limite à 20T ou 0T suivant signe de "speed"
+                        #case 0 :
+                        #   consigne_a_changer["condition"] = None
                         case 1 :
                            consigne_a_changer["condition"] = LABEL_SORTIE_EN_CHARGE + ">" + str(condition_superieure_a.get()/2)
                         case 2 :
@@ -1837,8 +1839,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                   case "ramp" :
                      consigne_a_changer["speed"] = COEF_MILLIMETERS_TO_VOLTS * speed.get()
                      match type_de_condition.get() :
-                        case 0 :
-                           consigne_a_changer["condition"] = None
+                        # TODO Ne fonctionne pas, mettre une limite à 20T ou 0T suivant signe de "speed"
+                        #case 0 :
+                        #   consigne_a_changer["condition"] = None
                         case 1 :
                            consigne_a_changer["condition"] = LABEL_SORTIE_EN_POSITION + ">" + str(COEF_MILLIMETERS_TO_VOLTS * condition_superieure_a.get())
                         case 2 :
@@ -1954,8 +1957,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                         type_de_condition.set(3)
                         condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
                   if verrou_production == OFF :
-                     Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
-                     Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+                     # TODO Ne fonctionne pas, mettre une limite à 20T ou 0T suivant signe de "speed"
+                     #Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                     #Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
                      
                      Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition, value = 1).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
                      Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_charge), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
@@ -2163,8 +2167,9 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                      else :
                         type_de_condition.set(3)
                         condition_en_temps.set(float(cond[DEBUT_CONDITION_TEMPS:]))
-                  Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
-                  Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
+                  # TODO Ne fonctionne pas, mettre une limite à 20T ou 0T suivant signe de "speed"
+                  #Label(fenetre_de_modification_d_une_consigne, text = "Condition d'arrêt :").grid(row = 2, column = 0, padx = 5, pady = 5)
+                  #Radiobutton(fenetre_de_modification_d_une_consigne, text = "aucune limite", variable = type_de_condition, value = 0).grid(row = 2, column = 1, columnspan = 4, padx = 5, pady = 5, sticky = 'w')
                   
                   Radiobutton(fenetre_de_modification_d_une_consigne, text = "      >", variable = type_de_condition, value = 1).grid(row = 3, column = 1, padx = 5, pady = 5, sticky = 'w')
                   Entry(fenetre_de_modification_d_une_consigne, width = 5, textvariable = condition_superieure_a, validate="key", validatecommand=(fenetre_de_modification_d_une_consigne.register(_check_entree_position), '%P')).grid(row = 3, column = 2, padx = 5, pady = 5)
@@ -2477,7 +2482,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                            if condition_d_arret is None :
                               label_de_cette_consigne += ", dure indéfiniment"
                            else :
-                              label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
+                              label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 4)} cycles"
                   else :
                      match consigne_du_generateur['type'] :
                         case "ramp" :
@@ -2542,7 +2547,7 @@ def fonction_principale(init_titre='', init_nom='', init_materiau='',
                            if condition_d_arret is None :
                               label_de_cette_consigne += ", dure indéfiniment"
                            else :
-                              label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 2)} cycles"
+                              label_de_cette_consigne += f" pendant {round(float(condition_d_arret[DEBUT_CONDITION_TEMPS:]) * consigne_du_generateur['freq'], 4)} cycles"
 
                   cadre_de_cette_consigne = LabelFrame(cadre_interne_consignes)
                   cadre_de_cette_consigne.grid(row = (2 * indice_de_cette_consigne), column = 0, columnspan = 3, padx = 5, pady = 4, sticky = 'w' + 'e')
